@@ -110,6 +110,38 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
             else:
                 return _submit_modal(page, vacancy)
 
+        # Проверяем foreign warning (другая страна)
+        has_foreign = page.evaluate("""
+            () => document.body.innerText.includes('другой стране') ||
+                  document.body.innerText.includes('другую страну')
+        """)
+        if has_foreign:
+            print(f"  [apply] {vacancy.title} — другая страна, подтверждаю...")
+            page.evaluate("""
+                () => {
+                    const btns = document.querySelectorAll('button');
+                    for (const b of btns) {
+                        const t = b.textContent.toLowerCase();
+                        if (t.includes('всё равно') || t.includes('продолжить')) {
+                            b.click(); return;
+                        }
+                    }
+                }
+            """)
+            page.wait_for_timeout(3000)
+
+            # После подтверждения — проверяем снэкбар или модалку
+            if _check_sent(page):
+                print(f"  [apply] {vacancy.title} — ОТКЛИК ОТПРАВЛЕН (другая страна)")
+                return STATUS_SENT
+
+            letter_input2 = page.locator('[data-qa="vacancy-response-popup-form-letter-input"]')
+            if letter_input2.count() > 0:
+                if use_cover_letter and cover_letter:
+                    return _fill_and_submit(page, vacancy, cover_letter, letter_input2)
+                else:
+                    return _submit_modal(page, vacancy)
+
         # Проверяем доп. вопросы
         if page.locator('[data-qa="form-helper-description"]').count() > 0:
             print(f"  [apply] {vacancy.title} — доп.вопросы, пропускаю")
