@@ -1,0 +1,6 @@
+data/
+__pycache__/
+*.pyc
+.mcp.json
+debug_*.py
+investigate.py
