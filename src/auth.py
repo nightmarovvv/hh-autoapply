@@ -13,8 +13,8 @@ from playwright.sync_api import BrowserContext, Page, Playwright
 from src.stealth import apply_stealth, random_viewport, random_user_agent
 
 
-def create_context(playwright: Playwright, config: dict) -> BrowserContext:
-    """Создаёт browser context с антидетект-мерами и сессией."""
+def create_context(playwright: Playwright, config: dict) -> tuple:
+    """Создаёт browser + context с антидетект-мерами. Возвращает (browser, context)."""
     storage_path = config["storage_state_path"]
     Path(storage_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +47,7 @@ def create_context(playwright: Playwright, config: dict) -> BrowserContext:
     apply_stealth(context)
 
     print(f"[auth] Viewport: {viewport['width']}x{viewport['height']}, UA: {ua[:50]}...")
-    return context
+    return browser, context
 
 
 def check_logged_in(page: Page) -> bool:

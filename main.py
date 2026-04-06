@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Автоотклики на hh.ru — гибрид: API-проверка + mouse click.
+"""Автоотклики на hh.ru.
+
+Гибрид: API-проверка типа (пропуск тестовых) + mouse.click (isTrusted).
 
     python main.py                  # Полный прогон
     python main.py --dry-run        # Только поиск
@@ -9,13 +11,14 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 import yaml
 from playwright.sync_api import sync_playwright
 
 from src.auth import create_context, login_if_needed, check_logged_in
 from src.search import do_search, collect_vacancy_ids_from_page, go_next_page
-from src.apply import apply_to_vacancy, human_delay
+from src.apply import apply_to_vacancy, human_delay, _check_captcha, _handle_captcha
 from src.api_apply import check_vacancy_type
 from src.tracker import Tracker
 
@@ -49,20 +52,31 @@ def main():
 
     with Tracker(config["db_path"]) as tracker:
         with sync_playwright() as pw:
-            context = create_context(pw, config)
+            browser, context = create_context(pw, config)
             try:
                 page = context.new_page()
 
                 if not login_if_needed(page, config):
                     return
 
-                do_search(page, config)
+                # Поиск с error handling
+                try:
+                    do_search(page, config)
+                except Exception as e:
+                    print(f"[!] Ошибка поиска: {e}")
+                    return
+
+                # Проверка капчи после поиска
+                if _check_captcha(page):
+                    print("[!] Капча на странице поиска!")
+                    _handle_captcha(page)
 
                 sent = 0
                 skipped = 0
                 page_num = 0
+                max_pages = 20  # Защита от бесконечного цикла
 
-                while sent < max_apps:
+                while sent < max_apps and page_num < max_pages:
                     vacancies = collect_vacancy_ids_from_page(page)
                     print(f"\n--- Стр. {page_num} ({len(vacancies)} вакансий) ---")
 
@@ -78,25 +92,33 @@ def main():
                         if sent >= max_apps:
                             break
 
+                        # Session check каждые 15 откликов
+                        if (sent + skipped) > 0 and (sent + skipped) % 15 == 0:
+                            if not check_logged_in(page):
+                                print("[!] Сессия истекла. Завершаю.")
+                                sent = max_apps  # Выход из цикла
+                                break
+
                         if args.dry_run:
                             info = check_vacancy_type(page, vacancy.vacancy_id)
                             print(f"  {vacancy.title[:45]:45s} | {info.get('type','?'):15s} | {info.get('area','?')}")
                             skipped += 1
                             continue
 
-                        # Пропускаем тестовые через API-проверку (быстро)
+                        # API-проверка типа (пропускаем тестовые)
                         info = check_vacancy_type(page, vacancy.vacancy_id)
-                        if info.get("type") == "test-required":
+                        vtype = info.get("type", "unknown")
+
+                        if vtype == "test-required":
                             print(f"  [skip] {vacancy.title} — тестовое")
                             skipped += 1
                             continue
-                        if info.get("type") == "already-applied":
+                        if vtype == "already-applied":
                             skipped += 1
                             continue
 
                         print(f"[{sent + 1}/{max_apps}] {vacancy.title} — {vacancy.company}")
 
-                        # Клик через JS (проверенный подход)
                         status = apply_to_vacancy(page, vacancy, cover_letter, use_cover_letter)
                         tracker.record(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
 
@@ -105,14 +127,31 @@ def main():
                         else:
                             skipped += 1
 
+                        # Капча после отклика
+                        if _check_captcha(page):
+                            print("[!] Капча!")
+                            _handle_captcha(page)
+
                         human_delay(config.get("delay_min", 5), config.get("delay_max", 12))
 
                     if sent >= max_apps:
                         break
-                    if not go_next_page(page):
+
+                    try:
+                        if not go_next_page(page):
+                            break
+                    except Exception as e:
+                        print(f"[!] Ошибка пагинации: {e}")
                         break
+
                     page_num += 1
 
+                    # Капча на странице пагинации
+                    if _check_captcha(page):
+                        print("[!] Капча на странице!")
+                        _handle_captcha(page)
+
+                # Итоги
                 print("\n" + "=" * 60)
                 if args.dry_run:
                     print(f"DRY RUN: {skipped} вакансий")
@@ -128,6 +167,7 @@ def main():
                 except Exception:
                     pass
                 context.close()
+                browser.close()
 
 
 if __name__ == "__main__":

@@ -71,21 +71,63 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
             print(f"  [apply] {vacancy.title} — карточка не найдена на странице")
             return STATUS_ERROR
 
-        # Кликаем на кнопку по vacancy_id (JS click)
-        page.evaluate(f"""
+        # Скроллим к карточке и кликаем через mouse (isTrusted: true)
+        box = page.evaluate(f"""
             () => {{
                 const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
                 for (const card of cards) {{
                     const link = card.querySelector('[data-qa="serp-item__title"]');
                     if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
-
                     const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                    if (btn) btn.click();
-                    return;
+                    if (!btn) return null;
+                    card.scrollIntoView({{block: 'center', behavior: 'smooth'}});
+                    return null; // Вернём координаты после скролла
                 }}
+                return null;
             }}
         """)
-        print(f"  [apply] {vacancy.title} — кликнул 'Откликнуться'")
+        page.wait_for_timeout(600)
+
+        # Получаем координаты после скролла
+        box = page.evaluate(f"""
+            () => {{
+                const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
+                for (const card of cards) {{
+                    const link = card.querySelector('[data-qa="serp-item__title"]');
+                    if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
+                    const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                    if (!btn) return null;
+                    const rect = btn.getBoundingClientRect();
+                    return {{x: rect.x, y: rect.y, w: rect.width, h: rect.height}};
+                }}
+                return null;
+            }}
+        """)
+
+        if box and box.get("w", 0) > 0:
+            # Mouse click — isTrusted: true!
+            import random as _rnd
+            cx = box["x"] + box["w"] / 2 + _rnd.uniform(-10, 10)
+            cy = box["y"] + box["h"] / 2 + _rnd.uniform(-3, 3)
+            page.mouse.move(cx, cy, steps=_rnd.randint(5, 12))
+            page.wait_for_timeout(_rnd.randint(80, 250))
+            page.mouse.click(cx, cy)
+            print(f"  [apply] {vacancy.title} — кликнул (mouse, isTrusted)")
+        else:
+            # Fallback — JS click
+            page.evaluate(f"""
+                () => {{
+                    const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
+                    for (const card of cards) {{
+                        const link = card.querySelector('[data-qa="serp-item__title"]');
+                        if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
+                        const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                        if (btn) btn.click();
+                        return;
+                    }}
+                }}
+            """)
+            print(f"  [apply] {vacancy.title} — кликнул (JS fallback)")
 
         page.wait_for_timeout(3000)
 
@@ -110,37 +152,65 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
             else:
                 return _submit_modal(page, vacancy)
 
-        # Проверяем foreign warning (другая страна)
+        # Foreign warning — модалка "Вы откликаетесь на вакансию в другой стране"
+        # Кнопка: "Все равно откликнуться" (без ё!) и "Отменить"
         has_foreign = page.evaluate("""
             () => document.body.innerText.includes('другой стране') ||
                   document.body.innerText.includes('другую страну')
         """)
         if has_foreign:
             print(f"  [apply] {vacancy.title} — другая страна, подтверждаю...")
-            page.evaluate("""
+            # Кликаем "Все равно откликнуться" (mouse click для isTrusted)
+            confirm_box = page.evaluate("""
                 () => {
                     const btns = document.querySelectorAll('button');
                     for (const b of btns) {
-                        const t = b.textContent.toLowerCase();
-                        if (t.includes('всё равно') || t.includes('продолжить')) {
-                            b.click(); return;
+                        const t = b.textContent.trim().toLowerCase();
+                        if (t.includes('все равно') || t.includes('всё равно')) {
+                            const rect = b.getBoundingClientRect();
+                            return {x: rect.x + rect.width/2, y: rect.y + rect.height/2};
                         }
                     }
+                    return null;
                 }
             """)
-            page.wait_for_timeout(3000)
+            if confirm_box:
+                import random as _rnd2
+                page.mouse.click(
+                    confirm_box["x"] + _rnd2.uniform(-5, 5),
+                    confirm_box["y"] + _rnd2.uniform(-2, 2),
+                )
+                page.wait_for_timeout(3000)
 
-            # После подтверждения — проверяем снэкбар или модалку
-            if _check_sent(page):
-                print(f"  [apply] {vacancy.title} — ОТКЛИК ОТПРАВЛЕН (другая страна)")
-                return STATUS_SENT
+                if _check_sent(page):
+                    print(f"  [apply] {vacancy.title} — ОТКЛИК ОТПРАВЛЕН (другая страна)")
+                    return STATUS_SENT
 
-            letter_input2 = page.locator('[data-qa="vacancy-response-popup-form-letter-input"]')
-            if letter_input2.count() > 0:
-                if use_cover_letter and cover_letter:
-                    return _fill_and_submit(page, vacancy, cover_letter, letter_input2)
-                else:
-                    return _submit_modal(page, vacancy)
+                # Может появиться модалка с письмом после подтверждения
+                letter_input2 = page.locator('[data-qa="vacancy-response-popup-form-letter-input"]')
+                if letter_input2.count() > 0:
+                    if use_cover_letter and cover_letter:
+                        return _fill_and_submit(page, vacancy, cover_letter, letter_input2)
+                    else:
+                        return _submit_modal(page, vacancy)
+
+                # Проверяем кнопку — изменилась ли
+                btn_after = page.evaluate(f"""
+                    () => {{
+                        const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
+                        for (const card of cards) {{
+                            const link = card.querySelector('[data-qa="serp-item__title"]');
+                            if (link && link.href.includes('/vacancy/{vacancy.vacancy_id}')) {{
+                                const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                                return btn ? btn.textContent.trim() : 'gone';
+                            }}
+                        }}
+                        return 'not_found';
+                    }}
+                """)
+                if "отправлен" in btn_after.lower() or btn_after == "gone":
+                    print(f"  [apply] {vacancy.title} — ОТКЛИК ОТПРАВЛЕН (кнопка после foreign)")
+                    return STATUS_SENT
 
         # Проверяем доп. вопросы
         if page.locator('[data-qa="form-helper-description"]').count() > 0:

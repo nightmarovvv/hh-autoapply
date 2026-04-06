@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-SUCCESS_STATUSES = ("sent", "cover_letter_sent")
+SUCCESS_STATUSES = ("sent", "cover_letter_sent", "letter_sent")
 
 
 class Tracker:
@@ -40,8 +40,9 @@ class Tracker:
 
     def is_applied(self, vacancy_id: str) -> bool:
         """Возвращает True только если отклик УСПЕШНО отправлен."""
+        placeholders = ",".join("?" for _ in SUCCESS_STATUSES)
         row = self.conn.execute(
-            "SELECT 1 FROM applications WHERE vacancy_id = ? AND status IN (?, ?)",
+            f"SELECT 1 FROM applications WHERE vacancy_id = ? AND status IN ({placeholders})",
             (vacancy_id, *SUCCESS_STATUSES),
         ).fetchone()
         return row is not None
