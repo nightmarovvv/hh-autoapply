@@ -131,6 +131,13 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
 
         page.wait_for_timeout(3000)
 
+        # Закрываем случайные новые вкладки (реклама)
+        if len(page.context.pages) > 1:
+            for p in page.context.pages:
+                if p != page:
+                    print(f"  [apply] Закрываю лишнюю вкладку: {p.url[:60]}")
+                    p.close()
+
         # Проверяем редирект (тестовое задание, страница отклика)
         if page.url != original_url:
             return _handle_redirect(page, vacancy, original_url)

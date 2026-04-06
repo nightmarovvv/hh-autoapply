@@ -120,6 +120,20 @@ def go_next_page(page: Page) -> bool:
     return True
 
 
+def dismiss_ads(page: Page) -> None:
+    """Закрывает рекламные попапы и оверлеи."""
+    page.evaluate("""
+        () => {
+            // Закрываем всё с close/dismiss кнопками
+            document.querySelectorAll('[class*="close"], [class*="dismiss"], [aria-label="close"]')
+                .forEach(el => { if (el.offsetParent) el.click(); });
+            // Удаляем рекламные оверлеи
+            document.querySelectorAll('[class*="banner"], [class*="promo"], [id*="adv"]')
+                .forEach(el => el.remove());
+        }
+    """)
+
+
 def _dismiss_cookies(page: Page) -> None:
     """Кликает кнопку принятия куки (не удаляет DOM)."""
     btn = page.locator('[data-qa="cookies-policy-informer"] button')
