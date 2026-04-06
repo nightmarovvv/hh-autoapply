@@ -24,9 +24,9 @@ cover_letter: |
 # Максимум откликов за один запуск
 max_applications: 50
 
-# Задержка между откликами (секунды, рандом в диапазоне)
-delay_min: 5
-delay_max: 12
+# Задержка между откликами (секунды)
+delay_min: 1
+delay_max: 4
 
 # Путь к файлу сохранённой сессии
 storage_state_path: data/storage_state.json

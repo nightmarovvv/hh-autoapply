@@ -295,6 +295,13 @@ def _check_sent(page: Page) -> bool:
 def _fill_and_submit(page: Page, vacancy: Vacancy, cover_letter: str, letter_input) -> str:
     """Заполняет сопроводительное и отправляет. Верифицирует результат."""
     print(f"  [apply] {vacancy.title} — вставляю сопроводительное...")
+    # Вставляем через Ctrl+V (как человек копирует из буфера)
+    letter_input.click()
+    page.wait_for_timeout(200)
+    page.evaluate(f"navigator.clipboard.writeText({repr(cover_letter)})")
+    page.keyboard.press("Meta+a")  # Выделить всё
+    page.wait_for_timeout(100)
+    # Fallback — fill, т.к. clipboard может быть заблокирован
     letter_input.fill(cover_letter)
     page.wait_for_timeout(500)
 
@@ -385,17 +392,9 @@ def _close_modal(page: Page) -> None:
 
 
 def human_delay(delay_min: int, delay_max: int) -> None:
-    """Пауза с нормальным распределением (имитация человека)."""
-    mean = (delay_min + delay_max) / 2
-    std = (delay_max - delay_min) / 4
-    delay = random.gauss(mean, std)
-    delay = max(delay_min, min(delay_max * 1.5, delay))
-
-    # Раз в ~10 откликов — длинная пауза
-    if random.random() < 0.08:
-        delay += random.uniform(15, 30)
-        print(f"  [delay] Длинная пауза {delay:.1f} сек (имитация)")
-    else:
-        print(f"  [delay] Пауза {delay:.1f} сек")
-
+    """Быстрая пауза — тык-тык-тык как реальный юзер."""
+    delay = random.uniform(delay_min, delay_max)
+    # Иногда чуть длиннее (скроллит, читает название)
+    if random.random() < 0.10:
+        delay += random.uniform(3, 8)
     time.sleep(delay)

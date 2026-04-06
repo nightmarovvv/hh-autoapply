@@ -164,8 +164,11 @@ def _type_and_search(page: Page, query: str) -> None:
 
     search_input.first.click()
     page.wait_for_timeout(300)
-    search_input.first.fill("")
-    search_input.first.fill(query)
+    search_input.first.fill("")  # Очистка
+    # Набираем посимвольно — как человек
+    import random
+    for char in query:
+        page.keyboard.type(char, delay=random.randint(50, 180))
     print(f"[search] Запрос: {query}")
     page.wait_for_timeout(500)
 
