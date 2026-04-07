@@ -249,29 +249,49 @@ def login(config):
         apply_stealth(context)
 
         page = context.new_page()
-        page.goto("https://hh.ru/account/login")
 
+        # Навигация с увеличенным таймаутом и обработкой ошибок
+        try:
+            page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
+        except Exception:
+            console.print("[yellow]Страница загружается медленно, но браузер открыт.[/yellow]")
+            console.print("[yellow]Если видите страницу — продолжайте логин.[/yellow]")
+
+        console.print()
         console.print("Браузер открыт. Залогиньтесь на hh.ru.")
-        console.print("После логина вернитесь сюда и нажмите [bold]Enter[/bold].")
+        console.print("Не торопитесь — введите код, дождитесь загрузки.")
+        console.print("Когда увидите главную страницу hh.ru — вернитесь сюда.")
+        console.print()
 
         try:
-            input("\n>>> Нажмите Enter когда залогинитесь: ")
+            input(">>> Нажмите Enter когда залогинитесь: ")
         except (EOFError, KeyboardInterrupt):
             console.print("\n[yellow]Прервано[/yellow]")
-            browser.close()
+            try:
+                browser.close()
+            except Exception:
+                pass
             sys.exit(1)
 
-        page.goto("https://hh.ru", wait_until="domcontentloaded")
-        page.wait_for_timeout(2000)
+        # Проверяем логин — с мягкой навигацией
+        try:
+            page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2000)
+        except Exception:
+            console.print("[dim]Навигация медленная, проверяю текущую страницу...[/dim]")
 
         if check_logged_in(page):
             context.storage_state(path=str(storage_path))
-            console.print(f"\n[green]Сессия сохранена[/green]")
+            console.print(f"\n[green]Сессия сохранена![/green]")
             console.print("Запускайте: [bold]hh-apply run[/bold]")
         else:
-            console.print("\n[red]Логин не подтверждён! Попробуйте ещё раз.[/red]")
+            console.print("\n[red]Логин не подтверждён.[/red]")
+            console.print("[dim]Убедитесь что вы залогинены и попробуйте ещё раз.[/dim]")
 
-        browser.close()
+        try:
+            browser.close()
+        except Exception:
+            pass
 
 
 @main.command()
