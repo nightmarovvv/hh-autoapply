@@ -90,18 +90,45 @@ def init():
     console = Console()
     target = Path.cwd() / "config.yaml"
 
+    existing_config = None
+    edit_mode = False
+
     if target.exists():
-        if not Confirm.ask("[yellow]config.yaml уже существует. Перезаписать?[/yellow]", console=console):
-            console.print("[dim]Отменено[/dim]")
+        # Загружаем текущий конфиг для дефолтов
+        with open(target, "r", encoding="utf-8") as f:
+            existing_config = yaml.safe_load(f) or {}
+
+        console.print("[yellow]config.yaml уже существует.[/yellow]")
+        console.print("[dim]Ваш логин и куки в безопасности — они хранятся отдельно в ~/.hh-apply/[/dim]\n")
+
+        choice = Prompt.ask(
+            "  Что сделать?",
+            choices=["edit", "new", "cancel"],
+            default="edit",
+            console=console,
+        )
+        if choice == "cancel":
             return
+        if choice == "edit":
+            edit_mode = True
+        # choice == "new" → полная перезапись
+
+    # Дефолты из существующего конфига
+    def _get(section, key, fallback=""):
+        if existing_config and edit_mode:
+            return existing_config.get(section, {}).get(key, fallback)
+        return fallback
 
     console.print()
     console.print(Panel("[bold blue]hh-apply[/bold blue] — настройка автооткликов", border_style="blue"))
+    if edit_mode:
+        console.print("[dim]Нажмите Enter чтобы оставить текущее значение[/dim]")
     console.print()
 
     # === Поиск ===
     console.print("[bold]1. Поиск[/bold]")
-    query = Prompt.ask("  Поисковый запрос", default="python developer", console=console)
+    default_query = _get("search", "query", "python developer")
+    query = Prompt.ask("  Поисковый запрос", default=str(default_query), console=console)
 
     # Регион
     console.print()
@@ -109,7 +136,15 @@ def init():
     area_names = list(AREAS.keys())
     for i, name in enumerate(area_names, 1):
         console.print(f"    {i}. {name}")
-    area_idx = IntPrompt.ask("  Номер региона", default=1, console=console)
+    # Находим текущий регион если есть
+    current_area = _get("search", "area", None)
+    default_area_idx = 1
+    if current_area:
+        for i, (name, aid) in enumerate(AREAS.items(), 1):
+            if aid == current_area:
+                default_area_idx = i
+                break
+    area_idx = IntPrompt.ask("  Номер региона", default=default_area_idx, console=console)
     area_idx = max(1, min(area_idx, len(area_names)))
     area_name = area_names[area_idx - 1]
     area_id = AREAS[area_name]
@@ -117,7 +152,8 @@ def init():
 
     # Зарплата
     console.print()
-    salary_str = Prompt.ask("  Минимальная зарплата (или Enter — без фильтра)", default="", console=console)
+    default_salary = _get("search", "salary_from", "")
+    salary_str = Prompt.ask("  Минимальная зарплата (или Enter — без фильтра)", default=str(default_salary) if default_salary else "", console=console)
     salary_from = int(salary_str) if salary_str.strip().isdigit() else None
     salary_only = False
     if salary_from:
@@ -129,7 +165,15 @@ def init():
     exp_names = list(EXPERIENCE_OPTIONS.keys())
     for i, name in enumerate(exp_names, 1):
         console.print(f"    {i}. {name}")
-    exp_idx = IntPrompt.ask("  Номер", default=5, console=console)
+    # Находим текущий опыт
+    current_exp = _get("search", "experience", None)
+    default_exp_idx = 5
+    if current_exp:
+        for i, (name, val) in enumerate(EXPERIENCE_OPTIONS.items(), 1):
+            if val == current_exp:
+                default_exp_idx = i
+                break
+    exp_idx = IntPrompt.ask("  Номер", default=default_exp_idx, console=console)
     exp_idx = max(1, min(exp_idx, len(exp_names)))
     experience = EXPERIENCE_OPTIONS[exp_names[exp_idx - 1]]
     console.print(f"  [green]Опыт: {exp_names[exp_idx - 1]}[/green]")
@@ -140,7 +184,17 @@ def init():
     sched_names = list(SCHEDULE_OPTIONS.keys())
     for i, name in enumerate(sched_names, 1):
         console.print(f"    {i}. {name}")
-    sched_input = Prompt.ask("  Номера через запятую (или Enter — любой)", default="", console=console)
+    # Текущие номера графика
+    current_scheds = _get("search", "schedule", [])
+    default_sched = ""
+    if current_scheds:
+        nums = []
+        for s in current_scheds:
+            for i, (name, val) in enumerate(SCHEDULE_OPTIONS.items(), 1):
+                if val == s:
+                    nums.append(str(i))
+        default_sched = ",".join(nums)
+    sched_input = Prompt.ask("  Номера через запятую (или Enter — любой)", default=default_sched, console=console)
     schedule = []
     if sched_input.strip():
         for s in sched_input.split(","):
@@ -153,28 +207,33 @@ def init():
     # === Фильтры ===
     console.print()
     console.print("[bold]2. Фильтры[/bold]")
+    default_kw = ", ".join(_get("filters", "exclude_keywords", []))
     exclude_kw = Prompt.ask(
         "  Исключить слова из названий (через запятую, или Enter — не исключать)",
-        default="", console=console,
+        default=default_kw, console=console,
     )
     exclude_keywords = [w.strip() for w in exclude_kw.split(",") if w.strip()] if exclude_kw.strip() else []
 
+    default_comp = ", ".join(_get("filters", "exclude_companies", []))
     exclude_comp = Prompt.ask(
         "  Исключить компании (через запятую, или Enter — не исключать)",
-        default="", console=console,
+        default=default_comp, console=console,
     )
     exclude_companies = [c.strip() for c in exclude_comp.split(",") if c.strip()] if exclude_comp.strip() else []
 
     # === Отклик ===
     console.print()
     console.print("[bold]3. Отклик[/bold]")
-    max_apps = IntPrompt.ask("  Максимум откликов за запуск", default=50, console=console)
+    default_max = _get("apply", "max_applications", 50)
+    max_apps = IntPrompt.ask("  Максимум откликов за запуск", default=int(default_max), console=console)
 
-    use_cover_letter = Confirm.ask("  Использовать сопроводительное письмо?", default=True, console=console)
+    default_use_letter = _get("apply", "use_cover_letter", True)
+    use_cover_letter = Confirm.ask("  Использовать сопроводительное письмо?", default=bool(default_use_letter), console=console)
     cover_letter = ""
     if use_cover_letter:
         console.print("  [dim]Введите текст (Enter для шаблона по умолчанию):[/dim]")
-        cover_input = Prompt.ask("  Сопроводительное", default="", console=console)
+        default_letter = _get("apply", "cover_letter", "")
+        cover_input = Prompt.ask("  Сопроводительное", default=str(default_letter).strip() if default_letter else "", console=console)
         if cover_input.strip():
             cover_letter = cover_input.strip()
         else:
