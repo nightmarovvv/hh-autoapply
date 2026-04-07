@@ -114,9 +114,13 @@ def init():
         # choice == "new" → полная перезапись
 
     # Дефолты из существующего конфига
+    _MISSING = object()
+
     def _get(section, key, fallback=""):
         if existing_config and edit_mode:
-            return existing_config.get(section, {}).get(key, fallback)
+            val = existing_config.get(section, {}).get(key, _MISSING)
+            if val is not _MISSING:
+                return val
         return fallback
 
     console.print()
@@ -139,11 +143,15 @@ def init():
     # Находим текущий регион если есть
     current_area = _get("search", "area", None)
     default_area_idx = 1
-    if current_area:
-        for i, (name, aid) in enumerate(AREAS.items(), 1):
-            if aid == current_area:
-                default_area_idx = i
-                break
+    if edit_mode:
+        # current_area=None означает "Удалённо (без региона)" — это последний пункт
+        if current_area is None:
+            default_area_idx = len(area_names)  # Последний = "Удалённо"
+        else:
+            for i, (name, aid) in enumerate(AREAS.items(), 1):
+                if aid == current_area:
+                    default_area_idx = i
+                    break
     area_idx = IntPrompt.ask("  Номер региона", default=default_area_idx, console=console)
     area_idx = max(1, min(area_idx, len(area_names)))
     area_name = area_names[area_idx - 1]

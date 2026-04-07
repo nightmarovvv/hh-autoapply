@@ -260,6 +260,7 @@ def _log_action(console: Console, status: str, vacancy) -> None:
     icon = LOG_ICONS.get(status, "")
     color = STATUS_COLORS.get(status, "white")
     label = STATUS_LABELS.get(status, status)
-    title = vacancy.title[:45] if hasattr(vacancy, 'title') else ""
+    title = vacancy.title[:40] if hasattr(vacancy, 'title') else ""
+    company = vacancy.company[:25] if hasattr(vacancy, 'company') else ""
     url = vacancy.url if hasattr(vacancy, 'url') else ""
-    console.print(f"  {icon} [{color}]{label}[/{color}] {url} ( {title} )")
+    console.print(f"  {icon} [{color}]{label}[/{color}] {url} ( {title} — {company} )")
