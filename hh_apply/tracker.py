@@ -115,6 +115,14 @@ class Tracker:
             for r in rows
         ]
 
+    def remove_skipped(self, vacancy_id: str) -> bool:
+        """Удаляет конкретную вакансию из пропущенных. Возвращает True если удалено."""
+        cursor = self.conn.execute(
+            "DELETE FROM skipped_vacancies WHERE vacancy_id = ?", (vacancy_id,)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
     def clear_skipped(self, reason: "str | None" = None):
         if reason:
             self.conn.execute("DELETE FROM skipped_vacancies WHERE reason = ?", (reason,))

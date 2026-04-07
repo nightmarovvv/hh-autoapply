@@ -63,6 +63,7 @@ HELP_TEXT = """
   hh-apply boost       Поднять резюме в поиске
   hh-apply whoami      Проверить аккаунт
   hh-apply stats       Статистика откликов
+  hh-apply done        Убрать решённую тестовую вакансию
   hh-apply query       SQL-запросы к базе
 
 [bold]Опции run:[/bold]
@@ -416,6 +417,86 @@ def stats(config):
         table.add_row("[bold]Всего[/bold]", f"[bold]{total}[/bold]")
 
         console.print(table)
+
+
+@main.command()
+@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
+@click.argument("vacancy_id", required=False)
+def done(config, vacancy_id):
+    """Отметить тестовую вакансию как решённую (убрать из списка).
+
+    \b
+    Использование:
+      hh-apply done                  # Интерактивный выбор
+      hh-apply done 12345678         # Убрать по ID вакансии
+      hh-apply done all              # Очистить все тестовые
+    """
+    from hh_apply.config import load_config, get_db_path, get_data_dir
+    from hh_apply.tracker import Tracker
+
+    console = Console()
+    cfg = load_config(config)
+    db_path = get_db_path(cfg)
+
+    if not db_path.exists():
+        console.print("[yellow]База данных не найдена.[/yellow]")
+        return
+
+    with Tracker(db_path) as tracker:
+        if vacancy_id == "all":
+            tracker.clear_skipped("test_required")
+            console.print("[green]Все тестовые вакансии удалены из списка.[/green]")
+            # Обновляем файл
+            test_path = get_data_dir(cfg) / "test_vacancies.txt"
+            tracker.export_skipped_tests(test_path)
+            return
+
+        if vacancy_id:
+            if tracker.remove_skipped(vacancy_id):
+                console.print(f"[green]Вакансия {vacancy_id} убрана из списка.[/green]")
+            else:
+                console.print(f"[yellow]Вакансия {vacancy_id} не найдена в пропущенных.[/yellow]")
+            # Обновляем файл
+            test_path = get_data_dir(cfg) / "test_vacancies.txt"
+            tracker.export_skipped_tests(test_path)
+            return
+
+        # Интерактивный режим — показываем список тестовых
+        tests = tracker.get_skipped("test_required")
+        if not tests:
+            console.print("[dim]Нет тестовых вакансий в списке.[/dim]")
+            return
+
+        console.print(f"[bold]Тестовые вакансии ({len(tests)} шт.):[/bold]\n")
+        for i, t in enumerate(tests, 1):
+            console.print(f"  {i}. {t['title']} — {t['company']}")
+            console.print(f"     [cyan]{t['url']}[/cyan]")
+            console.print(f"     [dim]ID: {t['vacancy_id']}[/dim]")
+            console.print()
+
+        choice = Prompt.ask(
+            "Номер вакансии для удаления (или 'all' для очистки, Enter — отмена)",
+            default="", console=console,
+        )
+
+        if not choice.strip():
+            return
+
+        if choice.strip().lower() == "all":
+            tracker.clear_skipped("test_required")
+            console.print("[green]Все тестовые вакансии удалены.[/green]")
+        elif choice.strip().isdigit():
+            idx = int(choice.strip())
+            if 1 <= idx <= len(tests):
+                vid = tests[idx - 1]["vacancy_id"]
+                tracker.remove_skipped(vid)
+                console.print(f"[green]Убрано: {tests[idx - 1]['title']}[/green]")
+            else:
+                console.print("[red]Неверный номер.[/red]")
+
+        # Обновляем файл
+        test_path = get_data_dir(cfg) / "test_vacancies.txt"
+        tracker.export_skipped_tests(test_path)
 
 
 @main.command(name="api-login")
