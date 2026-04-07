@@ -553,6 +553,7 @@ def stats(config, csv_export, json_export, output):
             "sent": ("[green]Отправлен[/green]", "green"),
             "cover_letter_sent": ("[green]С письмом[/green]", "green"),
             "letter_sent": ("[green]С письмом[/green]", "green"),
+            "letter_required": ("[yellow]Требует письмо[/yellow]", "yellow"),
             "test_required": ("[yellow]Тестовое[/yellow]", "yellow"),
             "extra_steps": ("[yellow]Доп. вопросы[/yellow]", "yellow"),
             "already_applied": ("[dim]Уже откликались[/dim]", "dim"),

@@ -34,6 +34,7 @@ LOG_ICONS = {
     "cover_letter_sent": "\U0001f4e8",
     "test_required": "\U0001f9ea",   # 🧪
     "extra_steps": "\u2753",         # ❓
+    "letter_required": "\u270f\ufe0f",  # ✏️
     "already_applied": "\u23e9",     # ⏩
     "filtered": "\u23e9",
     "error": "\u274c",               # ❌
@@ -46,6 +47,7 @@ STATUS_COLORS = {
     "cover_letter_sent": "green",
     "test_required": "yellow",
     "extra_steps": "yellow",
+    "letter_required": "yellow",
     "already_applied": "dim",
     "filtered": "dim",
     "error": "red",
@@ -58,6 +60,7 @@ STATUS_LABELS = {
     "cover_letter_sent": "Отклик с письмом",
     "test_required": "Тест — сохранено",
     "extra_steps": "Доп. вопросы — скип",
+    "letter_required": "Требует письмо — скип",
     "already_applied": "Уже откликались",
     "filtered": "Отфильтровано",
     "error": "Ошибка",
@@ -308,15 +311,21 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                                 skipped += 1
                                 continue
 
+                            # Закрываем попапы ПЕРЕД откликом
+                            from hh_apply.apply import _dismiss_popups
+                            _dismiss_popups(page)
+
                             status = _retry_apply(page, vacancy, cover_letter, use_cover_letter, skip_foreign)
                             tracker.record(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
                             report.add(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
                             progress.log(status, vacancy)
                             live.update(progress.build_display())
 
-                            # Сохраняем пропущенные с доп. вопросами
+                            # Сохраняем пропущенные
                             if status == "extra_steps":
                                 tracker.save_skipped(vacancy.vacancy_id, vacancy.title, vacancy.company, vacancy.url, "extra_steps")
+                            elif status == "letter_required":
+                                tracker.save_skipped(vacancy.vacancy_id, vacancy.title, vacancy.company, vacancy.url, "letter_required")
 
                             if status in ("sent", "cover_letter_sent"):
                                 sent += 1

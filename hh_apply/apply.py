@@ -21,6 +21,7 @@ STATUS_SENT = "sent"
 STATUS_COVER_LETTER = "cover_letter_sent"
 STATUS_TEST_REQUIRED = "test_required"
 STATUS_EXTRA_STEPS = "extra_steps"
+STATUS_LETTER_REQUIRED = "letter_required"
 STATUS_ALREADY_APPLIED = "already_applied"
 STATUS_NO_BUTTON = "no_button"
 STATUS_CAPTCHA = "captcha"
@@ -164,9 +165,17 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
         # Модалка с сопроводительным
         letter_input = page.locator('[data-qa="vacancy-response-popup-form-letter-input"]')
         if letter_input.count() > 0:
+            letter_is_required = _is_letter_required(page)
+
             if use_cover_letter and cover_letter:
+                # Юзер хочет письмо — вставляем всегда
                 return _fill_and_submit(page, vacancy, cover_letter, letter_input)
+            elif letter_is_required:
+                # Юзер БЕЗ письма, но вакансия ТРЕБУЕТ — пропускаем
+                _close_modal(page)
+                return STATUS_LETTER_REQUIRED
             else:
+                # Юзер без письма, вакансия не требует — отправляем без
                 return _submit_modal(page, vacancy)
 
         # Foreign warning
@@ -203,8 +212,12 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
 
                 letter_input2 = page.locator('[data-qa="vacancy-response-popup-form-letter-input"]')
                 if letter_input2.count() > 0:
+                    letter_is_required2 = _is_letter_required(page)
                     if use_cover_letter and cover_letter:
                         return _fill_and_submit(page, vacancy, cover_letter, letter_input2)
+                    elif letter_is_required2:
+                        _close_modal(page)
+                        return STATUS_LETTER_REQUIRED
                     else:
                         return _submit_modal(page, vacancy)
 
@@ -387,6 +400,19 @@ def _close_modal(page: Page) -> None:
     page.wait_for_timeout(500)
 
 
+def _is_letter_required(page: Page) -> bool:
+    """Проверяет, требует ли вакансия обязательное сопроводительное письмо."""
+    return page.evaluate("""
+        () => {
+            const text = document.body.innerText.toLowerCase();
+            return text.includes('обязательно') && (
+                text.includes('сопроводительн') || text.includes('письм')
+            ) || text.includes('letter is required')
+               || text.includes('требуется сопроводительн');
+        }
+    """)
+
+
 def _close_extra_tabs(page) -> None:
     """Закрывает ВСЕ вкладки кроме текущей."""
     try:
@@ -399,7 +425,7 @@ def _close_extra_tabs(page) -> None:
 
 
 def _dismiss_popups(page) -> None:
-    """Закрывает чат робота-рекрутера, модалки, оверлеи после отклика."""
+    """Закрывает ВСЕ мешающие попапы: чат, профиль, промо, уведомления."""
     try:
         page.evaluate("""
             () => {
@@ -409,22 +435,57 @@ def _dismiss_popups(page) -> None:
                     '[class*="chatbot"] [class*="close"], [class*="chat-widget"] [class*="close"]'
                 ).forEach(el => { try { el.click(); } catch(e) {} });
 
-                // 2. Модалки (кроме формы отклика!)
-                document.querySelectorAll('[data-qa="bloko-modal-close"]')
-                    .forEach(el => { try { el.click(); } catch(e) {} });
-
-                // 3. Общие попапы/оверлеи
+                // 2. Модалки — закрываем ВСЕ (кнопки-крестики)
                 document.querySelectorAll(
-                    '[class*="popup"] [class*="close"], [class*="overlay"] [class*="close"]'
+                    '[data-qa="bloko-modal-close"], ' +
+                    '[class*="modal"] [class*="close"], ' +
+                    '[class*="modal-close"], ' +
+                    'button[aria-label="close"], button[aria-label="Close"], ' +
+                    'button[aria-label="Закрыть"]'
+                ).forEach(el => {
+                    // Не закрываем форму отклика
+                    const modal = el.closest('[class*="modal"], [class*="popup"]');
+                    if (modal && modal.querySelector('[data-qa="vacancy-response-popup-form-letter-input"]')) return;
+                    try { el.click(); } catch(e) {}
+                });
+
+                // 3. Уведомления и баннеры hh.ru (профиль, промо, рекомендации)
+                document.querySelectorAll(
+                    '[data-qa="notification-close"], ' +
+                    '[data-qa="banner-close"], ' +
+                    '[class*="notification"] [class*="close"], ' +
+                    '[class*="banner"] [class*="close"], ' +
+                    '[class*="snackbar"] [class*="close"], ' +
+                    '[class*="toast"] [class*="close"], ' +
+                    '[class*="promo"] [class*="close"]'
                 ).forEach(el => {
                     if (el.offsetParent && el.offsetWidth > 0) {
                         try { el.click(); } catch(e) {}
                     }
                 });
 
-                // 4. Навязчивые iframe-виджеты
+                // 4. Кнопки "Позже", "Не сейчас", "Пропустить" в попапах
+                document.querySelectorAll('button, a').forEach(el => {
+                    const text = el.textContent.trim().toLowerCase();
+                    if (text === 'позже' || text === 'не сейчас' || text === 'пропустить' ||
+                        text === 'закрыть' || text === 'later' || text === 'skip') {
+                        const modal = el.closest('[class*="modal"], [class*="popup"], [class*="notification"]');
+                        if (modal) {
+                            try { el.click(); } catch(e) {}
+                        }
+                    }
+                });
+
+                // 5. Навязчивые iframe-виджеты
                 document.querySelectorAll('iframe[src*="chat"], iframe[src*="widget"]')
                     .forEach(el => el.remove());
+
+                // 6. Оверлеи (полупрозрачные фоны)
+                document.querySelectorAll('[class*="overlay"]').forEach(el => {
+                    if (el.offsetParent && el.style.position === 'fixed') {
+                        el.remove();
+                    }
+                });
             }
         """)
     except Exception:
