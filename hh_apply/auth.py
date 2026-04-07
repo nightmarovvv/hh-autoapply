@@ -439,16 +439,15 @@ def create_login_context(playwright: Playwright, config: dict) -> tuple:
         timezone_id="Europe/Moscow",
     )
 
-    # На Windows Patchright Chromium палится hh.ru — используем системный Chrome
-    if platform.system() == "Windows":
-        try:
-            context = playwright.chromium.launch_persistent_context(
-                channel="chrome",
-                **launch_kwargs,
-            )
-            return None, context
-        except Exception:
-            pass  # Chrome не установлен — fallback на Patchright
+    # Системный Chrome не палится антиботом hh.ru — пробуем его первым
+    try:
+        context = playwright.chromium.launch_persistent_context(
+            channel="chrome",
+            **launch_kwargs,
+        )
+        return None, context
+    except Exception:
+        pass  # Chrome не установлен — fallback на Patchright Chromium
 
     context = playwright.chromium.launch_persistent_context(**launch_kwargs)
 
