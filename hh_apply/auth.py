@@ -118,11 +118,15 @@ def login_native_browser(config: dict, console: Console) -> bool:
     ])
 
     console.print()
-    console.print(f"[bold]{browser_name} открыт. Залогиньтесь на hh.ru как обычно.[/bold]")
-    console.print("После логина вернитесь сюда.\n")
+    console.print(f"[bold]{browser_name} открыт.[/bold]\n")
+    console.print("  [bold]1.[/bold] В браузере нажмите [bold]Войти[/bold]")
+    console.print("  [bold]2.[/bold] Введите номер телефона и код из SMS (или email + пароль)")
+    console.print("  [bold]3.[/bold] Дождитесь полной загрузки страницы профиля")
+    console.print("  [bold]4.[/bold] Вернитесь сюда и нажмите Enter\n")
+    console.print("[dim]  Не закрывайте браузер сами — hh-apply сделает это автоматически.[/dim]\n")
 
     try:
-        input(">>> Нажмите Enter когда залогинитесь: ")
+        input(">>> Нажмите Enter когда ПОЛНОСТЬЮ залогинитесь: ")
     except (EOFError, KeyboardInterrupt):
         proc.terminate()
         return False
