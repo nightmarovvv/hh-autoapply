@@ -168,8 +168,10 @@ def init(output):
     # Зарплата
     default_salary = _get("search", "salary_from", "")
     salary_str = inquirer.text(
-        message="Минимальная зарплата (пусто = без фильтра):",
+        message="Минимальная зарплата в рублях (пусто = без фильтра):",
         default=str(default_salary) if default_salary else "",
+        validate=lambda x: x.strip() == "" or x.strip().isdigit(),
+        invalid_message="Только цифры (напр. 150000) или пустое поле",
     ).execute()
     salary_from = int(salary_str) if salary_str.strip().isdigit() else None
     salary_only = False
@@ -226,15 +228,29 @@ def init(output):
     exclude_companies = [c.strip() for c in exclude_comp.split(",") if c.strip()]
 
     default_pattern = _get("filters", "exclude_pattern", "")
+    def _valid_regex(x):
+        if not x.strip():
+            return True
+        try:
+            import re
+            re.compile(x.strip())
+            return True
+        except re.error:
+            return False
+
     exclude_pattern = inquirer.text(
-        message="Regex исключение по названию (напр. junior|стажёр|bitrix):",
+        message="Regex исключение по названию (напр. junior|стажёр|bitrix, Enter = пропустить):",
         default=str(default_pattern) if default_pattern else "",
+        validate=_valid_regex,
+        invalid_message="Неверный regex. Используйте | для ИЛИ (напр. junior|стажёр)",
     ).execute()
 
     default_company_pattern = _get("filters", "exclude_company_pattern", "")
     exclude_company_pattern = inquirer.text(
-        message="Regex исключение по компании (напр. аутсорс|крипто):",
+        message="Regex исключение по компании (напр. аутсорс|крипто, Enter = пропустить):",
         default=str(default_company_pattern) if default_company_pattern else "",
+        validate=_valid_regex,
+        invalid_message="Неверный regex. Используйте | для ИЛИ (напр. аутсорс|крипто)",
     ).execute()
 
     # === 3. Отклик ===
@@ -265,6 +281,7 @@ def init(output):
         ).execute()
         if not cover_letter.strip():
             cover_letter = "Здравствуйте!\n\nМеня заинтересовала вакансия {position} в {company}. Буду рад обсудить детали.\n\nС уважением"
+            console.print("[dim]  Используется шаблон по умолчанию[/dim]")
 
     # === Собираем конфиг ===
     config = {
