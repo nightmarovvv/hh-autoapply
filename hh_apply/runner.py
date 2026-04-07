@@ -124,9 +124,10 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                     console.print("[yellow]Капча на странице поиска![/yellow]")
                     _handle_captcha(page)
 
+                search_url = page.url  # Запоминаем URL страницы поиска
                 sent = 0
                 skipped = 0
-                processed = 0  # Общий счётчик (для dry-run лимита)
+                processed = 0
                 page_num = 0
                 max_pages = 30
                 limit_exceeded = False
@@ -202,6 +203,14 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                         if status in ("sent", "cover_letter_sent"):
                             sent += 1
                         processed += 1
+
+                        # Страховка: если мы не на странице поиска — вернуться
+                        if "/search/vacancy" not in page.url:
+                            try:
+                                page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+                                page.wait_for_timeout(2000)
+                            except Exception:
+                                pass
 
                         if _check_captcha(page):
                             _handle_captcha(page)

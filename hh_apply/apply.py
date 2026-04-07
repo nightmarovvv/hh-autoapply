@@ -94,6 +94,7 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
 
         if box and box.get("w", 0) > 0:
             # Убираем href чтобы клик не переходил на страницу вакансии
+            # + убираем target="_blank" чтобы не открывал в новой вкладке
             page.evaluate(f"""
                 () => {{
                     const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
@@ -101,16 +102,22 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                         const link = card.querySelector('[data-qa="serp-item__title"]');
                         if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
                         const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                        if (btn && btn.tagName === 'A') btn.removeAttribute('href');
+                        if (btn) {{
+                            btn.removeAttribute('href');
+                            btn.removeAttribute('target');
+                        }}
                         return;
                     }}
                 }}
             """)
-            cx = box["x"] + box["w"] / 2 + random.uniform(-10, 10)
-            cy = box["y"] + box["h"] / 2 + random.uniform(-3, 3)
-            human_mouse_move(page, cx, cy)
+            # Кликаем точно по центру кнопки с минимальным jitter (±3px)
+            cx = box["x"] + box["w"] / 2 + random.uniform(-3, 3)
+            cy = box["y"] + box["h"] / 2 + random.uniform(-2, 2)
+            page.mouse.move(cx, cy, steps=random.randint(5, 10))
+            page.wait_for_timeout(random.randint(50, 150))
             page.mouse.click(cx, cy)
         else:
+            # Fallback — JS click напрямую по кнопке
             page.evaluate(f"""
                 () => {{
                     const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
@@ -118,7 +125,11 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                         const link = card.querySelector('[data-qa="serp-item__title"]');
                         if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
                         const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                        if (btn) btn.click();
+                        if (btn) {{
+                            btn.removeAttribute('href');
+                            btn.removeAttribute('target');
+                            btn.click();
+                        }}
                         return;
                     }}
                 }}
@@ -126,18 +137,20 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
 
         page.wait_for_timeout(3000)
 
-        # Закрываем рекламные вкладки
-        if len(page.context.pages) > 1:
-            for p in page.context.pages:
-                if p != page:
-                    p.close()
+        # Закрываем ВСЕ лишние вкладки (реклама, вакансии, чат)
+        _close_extra_tabs(page)
 
         # Закрываем чат робота-рекрутера и другие попапы
         _dismiss_popups(page)
 
-        # Проверяем редирект
+        # Если нас перекинуло куда-то — разбираемся
         if page.url != original_url:
-            return _handle_redirect(page, vacancy, original_url)
+            result = _handle_redirect(page, vacancy, original_url)
+            # КРИТИЧНО: убеждаемся что вернулись на страницу поиска
+            if "/search/vacancy" not in page.url:
+                page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
+                page.wait_for_timeout(2000)
+            return result
 
         # Капча
         if _check_captcha(page):
@@ -372,29 +385,48 @@ def _close_modal(page: Page) -> None:
     page.wait_for_timeout(500)
 
 
+def _close_extra_tabs(page) -> None:
+    """Закрывает ВСЕ вкладки кроме текущей."""
+    try:
+        pages = page.context.pages
+        for p in pages:
+            if p != page:
+                p.close()
+    except Exception:
+        pass
+
+
 def _dismiss_popups(page) -> None:
     """Закрывает чат робота-рекрутера, модалки, оверлеи после отклика."""
-    page.evaluate("""
-        () => {
-            // Чат-бот рекрутера (появляется сразу после отклика)
-            const chatClose = document.querySelectorAll(
-                '[data-qa="chatbot-close"], [data-qa="chat-close"], ' +
-                '[class*="chatbot"] [class*="close"], [class*="chat-widget"] [class*="close"], ' +
-                '[data-qa="bloko-modal-close"]'
-            );
-            chatClose.forEach(el => { try { el.click(); } catch(e) {} });
+    try:
+        page.evaluate("""
+            () => {
+                // 1. Чат-бот рекрутера
+                document.querySelectorAll(
+                    '[data-qa="chatbot-close"], [data-qa="chat-close"], ' +
+                    '[class*="chatbot"] [class*="close"], [class*="chat-widget"] [class*="close"]'
+                ).forEach(el => { try { el.click(); } catch(e) {} });
 
-            // Общие close-кнопки попапов
-            document.querySelectorAll(
-                '[class*="popup"] [class*="close"], [class*="overlay"] [class*="close"], ' +
-                '[class*="modal"] [class*="close"]:not([data-qa="vacancy-response-popup-form-letter-input"])'
-            ).forEach(el => {
-                if (el.offsetParent && el.offsetWidth > 0) {
-                    try { el.click(); } catch(e) {}
-                }
-            });
-        }
-    """)
+                // 2. Модалки (кроме формы отклика!)
+                document.querySelectorAll('[data-qa="bloko-modal-close"]')
+                    .forEach(el => { try { el.click(); } catch(e) {} });
+
+                // 3. Общие попапы/оверлеи
+                document.querySelectorAll(
+                    '[class*="popup"] [class*="close"], [class*="overlay"] [class*="close"]'
+                ).forEach(el => {
+                    if (el.offsetParent && el.offsetWidth > 0) {
+                        try { el.click(); } catch(e) {}
+                    }
+                });
+
+                // 4. Навязчивые iframe-виджеты
+                document.querySelectorAll('iframe[src*="chat"], iframe[src*="widget"]')
+                    .forEach(el => el.remove());
+            }
+        """)
+    except Exception:
+        pass
 
 
 def human_delay(delay_min: float, delay_max: float) -> None:
