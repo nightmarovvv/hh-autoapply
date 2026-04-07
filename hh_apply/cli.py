@@ -348,9 +348,11 @@ def _validate_config_search(config: dict, console: Console) -> None:
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def login(config):
     """Войти в hh.ru и сохранить сессию."""
+    import platform as _platform
     from hh_apply.config import load_config, get_storage_path
     from hh_apply.auth import (
         create_login_context, login_manual, login_phone, login_password,
+        login_native_browser,
     )
     from patchright.sync_api import sync_playwright
 
@@ -367,20 +369,39 @@ def login(config):
 
     console.print("[bold blue]hh-apply login[/bold blue]\n")
 
+    # На Windows "Через Chrome" — дефолтный и рекомендуемый способ
+    is_windows = _platform.system() == "Windows"
+    default_choice = "Через свой Chrome (рекомендуется)" if is_windows else "По номеру телефона (SMS-код)"
+
     method = inquirer.select(
         message="Как войти?",
         choices=[
+            "Через свой Chrome (рекомендуется)",
             "По номеру телефона (SMS-код)",
             "По email и паролю",
-            "Сам в браузере (откроется hh.ru)",
+            "Встроенный браузер (может не работать на Windows)",
         ],
-        default="По номеру телефона (SMS-код)",
+        default=default_choice,
     ).execute()
 
+    # "Через свой Chrome" — отдельная ветка, без Playwright
+    if method == "Через свой Chrome (рекомендуется)":
+        success = login_native_browser(cfg, console)
+        if success:
+            console.print(f"\n[green]Сессия сохранена![/green]")
+            console.print("\n[bold]Следующий шаг:[/bold]")
+            console.print("  [bold]hh-apply run --dry-run[/bold] — пробный запуск")
+            console.print("  [bold]hh-apply run[/bold]           — боевые отклики")
+        else:
+            console.print("\n[red]Логин не подтверждён.[/red]")
+            console.print("[dim]Попробуйте другой способ входа.[/dim]")
+        return
+
+    # Остальные методы — через Playwright
     LOGIN_METHODS = {
         "По номеру телефона (SMS-код)": login_phone,
         "По email и паролю": login_password,
-        "Сам в браузере (откроется hh.ru)": login_manual,
+        "Встроенный браузер (может не работать на Windows)": login_manual,
     }
 
     login_fn = LOGIN_METHODS[method]

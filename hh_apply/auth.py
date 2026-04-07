@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import getpass
 import os
+import platform
+import shutil
+import subprocess
 from pathlib import Path
 
 from rich.console import Console
@@ -338,6 +341,125 @@ def login_password(page: Page, console: Console) -> bool:
         pass
 
     return check_logged_in(page)
+
+
+def _find_chrome_path() -> str | None:
+    """Находит путь к Google Chrome на текущей ОС."""
+    system = platform.system()
+
+    if system == "Windows":
+        candidates = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]
+    elif system == "Darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ]
+    else:
+        candidates = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+        ]
+
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+
+    # Попробуем через which/where
+    cmd = "where" if system == "Windows" else "which"
+    for name in ["google-chrome", "chrome", "chromium"]:
+        try:
+            result = subprocess.run([cmd, name], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip().split("\n")[0]
+        except Exception:
+            pass
+
+    return None
+
+
+def login_native_browser(config: dict, console: Console) -> bool:
+    """Логин через нативный Chrome БЕЗ Playwright.
+
+    Запускает настоящий Chrome как обычный процесс (subprocess),
+    без CDP, без автоматизации. hh.ru не может отличить от обычного
+    юзера. Пользователь логинится сам, потом мы забираем куки из профиля.
+
+    Это единственный способ который работает на Windows — Playwright/Patchright
+    палятся антиботом hh.ru при логине.
+    """
+    from hh_apply.config import get_data_dir, get_storage_path
+
+    chrome_path = _find_chrome_path()
+    if not chrome_path:
+        console.print("[red]Google Chrome не найден.[/red]")
+        console.print("[dim]Установите Chrome: https://www.google.com/chrome/[/dim]")
+        return False
+
+    data_dir = get_data_dir(config)
+    profile_dir = str(data_dir / "browser_profile")
+    storage_path = get_storage_path(config)
+
+    console.print(f"[dim]Запускаю Chrome...[/dim]")
+
+    # Запускаем Chrome с отдельным профилем
+    proc = subprocess.Popen([
+        chrome_path,
+        f"--user-data-dir={profile_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "https://hh.ru/account/login",
+    ])
+
+    console.print()
+    console.print("[bold]Chrome открыт. Залогиньтесь на hh.ru как обычно.[/bold]")
+    console.print("После логина вернитесь сюда.\n")
+
+    try:
+        input(">>> Нажмите Enter когда залогинитесь: ")
+    except (EOFError, KeyboardInterrupt):
+        proc.terminate()
+        return False
+
+    # Закрываем Chrome чтобы куки записались на диск
+    console.print("[dim]Закрываю Chrome и сохраняю сессию...[/dim]")
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+    # Теперь открываем тот же профиль через Playwright чтобы экспортировать storage_state
+    from patchright.sync_api import sync_playwright
+
+    try:
+        with sync_playwright() as pw:
+            context = pw.chromium.launch_persistent_context(
+                user_data_dir=profile_dir,
+                headless=True,
+                viewport=random_viewport(),
+                locale="ru-RU",
+                timezone_id="Europe/Moscow",
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+
+            page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2000)
+
+            if check_logged_in(page):
+                context.storage_state(path=str(storage_path))
+                context.close()
+                return True
+            else:
+                context.close()
+                return False
+    except Exception as e:
+        console.print(f"[red]Ошибка при сохранении сессии: {e}[/red]")
+        return False
 
 
 # === Контексты ===
