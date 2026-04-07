@@ -8,12 +8,19 @@ build/
 .eggs/
 .mcp.json
 .claude/
+.DS_Store
 
-# Debug scripts
+# Старый прототип
+src/
+main.py
+login.py
+requirements.txt
+config.yaml
+
+# Debug/research
 debug_*.py
 investigate.py
 intercept*.py
 
 # User data
-config.yaml
 *.db
