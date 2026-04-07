@@ -17,263 +17,153 @@ CLI для автоматических откликов на [hh.ru](https://hh
 
 ## Установка
 
-Никогда не работали с терминалом? Не проблема. Ниже — пошаговая инструкция с нуля. Копируйте каждую команду и вставляйте в терминал по одной.
+Копируйте каждую команду и вставляйте в терминал по одной.
+
+> **Не знаете как открыть терминал?**
+> - **macOS:** нажмите **Cmd + Пробел**, введите **Terminal**, нажмите Enter
+> - **Windows:** нажмите клавишу **Win**, введите **powershell**, нажмите Enter
+> - **Linux:** нажмите **Ctrl + Alt + T**
 
 ---
 
-<details open>
-<summary><h3>macOS</h3></summary>
+### Шаг 1. Проверьте Python
 
-#### Как открыть терминал
-
-1. Нажмите **Cmd + Пробел** (появится строка поиска Spotlight)
-2. Введите **Terminal**
-3. Нажмите **Enter**
-
-Откроется окно с чёрным или белым фоном и мигающим курсором. Сюда вставляйте команды.
-
----
-
-#### Шаг 1. Установите Homebrew
-
-Homebrew — это менеджер пакетов для macOS. Скопируйте эту команду, вставьте в терминал и нажмите Enter:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-Установка попросит ввести пароль от Mac — это нормально. При вводе пароль не отображается (даже звёздочки) — просто введите и нажмите Enter.
-
-Если в конце установки написано `Add Homebrew to your PATH` — выполните те команды которые он показал.
-
-Проверьте что Homebrew работает:
-
-```bash
-brew --version
-```
-
-> Если пишет `brew: command not found` — закройте терминал, откройте заново и попробуйте ещё раз.
-
----
-
-#### Шаг 2. Установите Python и Git
-
-```bash
-brew install python git
-```
-
-Дождитесь окончания (может занять 1-2 минуты). Проверьте:
-
+macOS / Linux:
 ```bash
 python3 --version
 ```
 
-> Должно показать что-то вроде `Python 3.12.x`. Если показывает — идём дальше.
+Windows:
+```
+python --version
+```
+
+Если показывает `Python 3.9` или выше — переходите к **Шагу 2**.
+
+Если пишет "не найдено" или открывается Microsoft Store:
+
+<details>
+<summary><b>Как установить Python</b></summary>
+
+**macOS:**
+
+Сначала установите Homebrew (менеджер пакетов). Вставьте в терминал:
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+> Попросит пароль от Mac — это нормально. При вводе пароль не отображается — просто введите и нажмите Enter. Если в конце написано `Add Homebrew to your PATH` — выполните те команды которые он показал.
+
+Затем установите Python:
+```bash
+brew install python
+```
 
 ---
 
-#### Шаг 3. Установите hh-apply
+**Windows:**
 
-```bash
-python3 -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
-```
+1. Откройте [python.org/downloads](https://www.python.org/downloads/)
+2. Нажмите жёлтую кнопку **"Download Python"**
+3. Запустите скачанный файл
+4. **ВАЖНО:** на первом экране внизу есть галочка **"Add python.exe to PATH"** — **поставьте её**. Без неё ничего не будет работать
+5. Нажмите **"Install Now"**
+6. **Закройте PowerShell и откройте заново**
 
-> Побегут строки с текстом — это нормально, идёт скачивание. Дождитесь `Successfully installed`.
-
----
-
-#### Шаг 4. Скачайте браузер
-
-hh-apply работает через скрытый браузер Chromium. Его нужно скачать один раз:
-
-```bash
-python3 -m patchright install chromium
-```
+> Если забыли галочку — удалите Python через **Параметры → Приложения**, скачайте заново и поставьте.
 
 ---
 
-#### Шаг 5. Проверьте что всё работает
-
+**Ubuntu / Debian / WSL:**
 ```bash
-python3 -m hh_apply.cli --version
+sudo apt update && sudo apt install -y python3 python3-pip python3-venv
 ```
-
-> Если видите номер версии (например `1.1.0`) — всё установлено. Переходите к [быстрому старту](#быстрый-старт).
 
 </details>
 
 ---
 
-<details>
-<summary><h3>Windows</h3></summary>
+### Шаг 2. Проверьте Git
 
-#### Как открыть PowerShell
+Git нужен чтобы скачать hh-apply с GitHub.
 
-1. Нажмите клавишу **Win** (флажок Windows на клавиатуре)
-2. Введите **powershell**
-3. Нажмите **Enter**
-
-Откроется синее окно — это PowerShell. Сюда вставляйте команды (правой кнопкой мыши = вставить).
-
----
-
-#### Шаг 1. Установите Python
-
-1. Откройте в браузере: [python.org/downloads](https://www.python.org/downloads/)
-2. Нажмите большую жёлтую кнопку **"Download Python 3.x.x"**
-3. Запустите скачанный файл
-4. **ВАЖНО:** на первом экране установщика внизу есть галочка **"Add python.exe to PATH"** — **поставьте её**. Без неё ничего не будет работать.
-5. Нажмите **"Install Now"**
-6. Дождитесь окончания, нажмите **"Close"**
-
-**Закройте PowerShell и откройте заново** (чтобы он увидел Python).
-
-Проверьте:
-
-```
-python --version
-```
-
-> Должно показать `Python 3.x.x`. Если открывается Microsoft Store или пишет "не распознана" — вы забыли галочку "Add to PATH". Удалите Python через **Параметры → Приложения**, скачайте заново и поставьте галочку.
-
----
-
-#### Шаг 2. Установите Git
-
-1. Откройте в браузере: [git-scm.com/download/win](https://git-scm.com/download/win)
-2. Скачивание начнётся автоматически
-3. Запустите установщик, нажимайте **Next** во всех окнах, в конце **Install**
-4. **Закройте PowerShell и откройте заново**
-
-Проверьте:
-
-```
+```bash
 git --version
 ```
 
-> Должно показать `git version 2.x.x`.
+Если показывает версию — переходите к **Шагу 3**.
+
+<details>
+<summary><b>Как установить Git</b></summary>
+
+**macOS:**
+```bash
+brew install git
+```
+
+**Windows:**
+1. Откройте [git-scm.com/download/win](https://git-scm.com/download/win) — скачивание начнётся автоматически
+2. Запустите установщик, нажимайте **Next** во всех окнах, в конце **Install**
+3. **Закройте PowerShell и откройте заново**
+
+**Linux:**
+```bash
+sudo apt install -y git
+```
+
+</details>
 
 ---
 
-#### Шаг 3. Установите hh-apply
+### Шаг 3. Установите hh-apply
 
+macOS / Linux:
+```bash
+pip3 install git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
-python -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
+
+Windows:
+```
+pip install git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
 > Побегут строки — это скачивание. Дождитесь `Successfully installed`.
 
 ---
 
-#### Шаг 4. Скачайте браузер
+### Шаг 4. Скачайте браузер
 
-```
-python -m patchright install chromium
-```
-
----
-
-#### Шаг 5. Проверьте
-
-```
-python -m hh_apply.cli --version
-```
-
-> Если видите номер версии — всё работает!
-
-**Важно для Windows:** вместо `hh-apply` всегда пишите `python -m hh_apply.cli`. Примеры:
-
-```
-python -m hh_apply.cli init
-```
-
-```
-python -m hh_apply.cli login
-```
-
-```
-python -m hh_apply.cli run
-```
-
-</details>
-
----
-
-<details>
-<summary><h3>Ubuntu / Debian / WSL</h3></summary>
-
-#### Как открыть терминал
-
-- **Ubuntu:** нажмите **Ctrl + Alt + T**
-- **WSL:** откройте **Windows Terminal** или найдите **Ubuntu** в меню Пуск
-
----
-
-#### Шаг 1. Установите Python, pip и Git
+hh-apply работает через скрытый браузер Chromium. Его нужно скачать один раз:
 
 ```bash
-sudo apt update && sudo apt install -y python3 python3-pip python3-venv git
+patchright install chromium
 ```
 
-> Система попросит пароль — введите его (символы не отображаются) и нажмите Enter.
-
-Проверьте:
-
-```bash
-python3 --version
-```
+> На Linux также выполните: `patchright install-deps chromium`
 
 ---
 
-#### Шаг 2. Установите hh-apply
+### Шаг 5. Проверьте
 
 ```bash
-python3 -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
+hh-apply --version
 ```
+
+Видите номер версии (например `1.1.0`)? Всё работает! Переходите к [быстрому старту](#быстрый-старт).
+
+> Если пишет "не найдено" / "не является командой" — смотрите [Частые проблемы](#частые-проблемы).
 
 ---
-
-#### Шаг 3. Скачайте браузер и зависимости
-
-```bash
-python3 -m patchright install chromium
-```
-
-```bash
-python3 -m patchright install-deps chromium
-```
-
----
-
-#### Шаг 4. Проверьте
-
-```bash
-python3 -m hh_apply.cli --version
-```
-
-</details>
-
----
-
-### Как запускать
-
-| Ваша ОС | Команда запуска |
-|----------|----------------|
-| **macOS / Linux** | `python3 -m hh_apply.cli run` |
-| **Windows** | `python -m hh_apply.cli run` |
-
-> В README ниже команды написаны как `hh-apply run` для краткости. Если `hh-apply` у вас не работает — заменяйте на `python3 -m hh_apply.cli run` (macOS/Linux) или `python -m hh_apply.cli run` (Windows).
 
 ### Обновление до последней версии
 
 macOS / Linux:
 ```bash
-python3 -m pip install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
+pip3 install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
 Windows:
 ```
-python -m pip install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
+pip install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
 ## Быстрый старт
@@ -450,45 +340,66 @@ python3 -m pip install ...
 <details>
 <summary><b>"hh-apply" не является внутренней или внешней командой (Windows)</b></summary>
 
-Это нормально на Windows. Используйте полную форму запуска:
+Python установил hh-apply в папку которую Windows не видит. Исправим за одну команду — **закройте PowerShell, откройте заново** и выполните:
+
+```
+pip install --force-reinstall git+https://github.com/nightmarovvv/hh-autoapply.git
+```
+
+После этого попробуйте снова:
+
+```
+hh-apply --version
+```
+
+Всё ещё не работает? Тогда используйте альтернативный запуск (работает всегда):
+
+```
+python -m hh_apply.cli --version
+```
 
 ```
 python -m hh_apply.cli init
 ```
 
 ```
-python -m hh_apply.cli login
-```
-
-```
 python -m hh_apply.cli run
 ```
-
-Так работает всегда и наверняка.
 
 </details>
 
 <details>
 <summary><b>hh-apply: command not found (macOS / Linux)</b></summary>
 
-pip установил программу в папку которая не в PATH. Два варианта:
+pip установил программу в папку которая не в PATH. Выполните одну команду и всё заработает:
 
-**Вариант 1** — запускать через python (работает сразу):
-
-```bash
-python3 -m hh_apply.cli run
-```
-
-**Вариант 2** — добавить папку в PATH (один раз, потом `hh-apply` будет работать):
-
-Для **zsh** (macOS по умолчанию):
+**macOS (zsh):**
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-Для **bash** (Linux по умолчанию):
+**Linux (bash):**
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+```
+
+Проверьте:
+```bash
+hh-apply --version
+```
+
+Всё ещё не работает? Используйте альтернативный запуск:
+
+```bash
+python3 -m hh_apply.cli --version
+```
+
+```bash
+python3 -m hh_apply.cli init
+```
+
+```bash
+python3 -m hh_apply.cli run
 ```
 
 </details>
@@ -515,16 +426,21 @@ sudo apt install git
 <details>
 <summary><b>Ошибка при установке Chromium</b></summary>
 
-Если `python3 -m patchright install chromium` выдаёт ошибку:
+Если `patchright install chromium` выдаёт ошибку:
 
 **Проверьте что patchright установлен:**
 ```bash
-python3 -m pip install patchright
+pip3 install patchright
+```
+
+**Повторите установку браузера:**
+```bash
+patchright install chromium
 ```
 
 **На Linux нужны системные зависимости:**
 ```bash
-python3 -m patchright install-deps chromium
+patchright install-deps chromium
 ```
 
 </details>
@@ -542,7 +458,7 @@ hh.ru иногда показывает капчу новым посетител
 Куки hh.ru живут около 2 недель. Перелогиньтесь:
 
 ```bash
-python3 -m hh_apply.cli login
+hh-apply login
 ```
 
 </details>
