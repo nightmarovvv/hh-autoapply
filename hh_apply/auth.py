@@ -35,7 +35,11 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
         "--disable-default-apps",
     ]
 
+    # Прокси: конфиг → env переменные → None
     proxy = browser_config.get("proxy")
+    if not proxy:
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
+
     launch_kwargs = dict(
         headless=browser_config.get("headless", False),
         args=launch_args,

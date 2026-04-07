@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urlencode
 
 
@@ -91,7 +92,7 @@ def build_search_url(search_config: dict) -> str:
     return base
 
 
-def should_skip_vacancy(vacancy, filters_config: dict) -> str | None:
+def should_skip_vacancy(vacancy, filters_config: dict) -> "str | None":
     """Проверяет, нужно ли пропустить вакансию по фильтрам.
 
     Возвращает причину пропуска или None.
@@ -99,10 +100,21 @@ def should_skip_vacancy(vacancy, filters_config: dict) -> str | None:
     title_lower = vacancy.title.lower()
     company_lower = vacancy.company.lower()
 
+    # Regex exclude
+    pattern = filters_config.get("exclude_pattern", "")
+    if pattern:
+        try:
+            if re.search(pattern, vacancy.title, re.IGNORECASE):
+                return f"regex: {pattern}"
+        except re.error:
+            pass
+
+    # Keyword exclude
     for keyword in filters_config.get("exclude_keywords", []):
         if keyword.lower() in title_lower:
             return f"ключевое слово: {keyword}"
 
+    # Company exclude
     for company in filters_config.get("exclude_companies", []):
         if company.lower() in company_lower:
             return f"компания: {company}"

@@ -280,7 +280,8 @@ def login(config):
 @click.option("--headless", is_flag=True, help="Скрытый режим браузера")
 @click.option("--dry-run", is_flag=True, help="Только поиск, без откликов")
 @click.option("--report", "-r", type=str, help="Сохранить отчёт в файл")
-def run(config, limit, headless, dry_run, report):
+@click.option("--exclude", "-e", type=str, help="Regex для исключения вакансий (напр. junior|стажёр)")
+def run(config, limit, headless, dry_run, report, exclude):
     """Запустить автоотклики."""
     from hh_apply.config import load_config
     from hh_apply.runner import run as do_run
@@ -299,7 +300,7 @@ def run(config, limit, headless, dry_run, report):
     if headless:
         cfg["browser"]["headless"] = True
 
-    do_run(cfg, dry_run=dry_run, report_path=report)
+    do_run(cfg, dry_run=dry_run, report_path=report, exclude_pattern=exclude)
 
 
 @main.command()
@@ -346,3 +347,215 @@ def stats(config):
         table.add_row("[bold]Всего[/bold]", f"[bold]{total}[/bold]")
 
         console.print(table)
+
+
+@main.command(name="api-login")
+@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
+def api_login(config):
+    """OAuth авторизация для API-команд (whoami, boost)."""
+    import asyncio
+    from urllib.parse import parse_qs, urlsplit
+    from hh_apply.config import load_config, get_data_dir
+    from hh_apply.api_client import HHApiClient, ANDROID_CLIENT_ID
+    from patchright.sync_api import sync_playwright
+
+    console = Console()
+    cfg = load_config(config)
+    data_dir = get_data_dir(cfg)
+    client = HHApiClient(data_dir / "api_token.json")
+
+    console.print("[bold blue]hh-apply api-login[/bold blue]")
+    console.print("Откроется браузер для OAuth авторизации.\n")
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=False)
+        # Эмулируем Android-устройство
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Linux; Android 14; SM-A556B) AppleWebKit/537.36 Chrome/136.0.0.0 Mobile Safari/537.36",
+            viewport={"width": 412, "height": 915},
+            is_mobile=True,
+        )
+        page = context.new_page()
+
+        auth_code = None
+
+        def handle_request(request):
+            nonlocal auth_code
+            url = request.url
+            if url.startswith("hhandroid://"):
+                sp = urlsplit(url)
+                codes = parse_qs(sp.query).get("code", [])
+                if codes:
+                    auth_code = codes[0]
+
+        page.on("request", handle_request)
+        page.goto(client.authorize_url)
+
+        console.print("Залогиньтесь в браузере.")
+        console.print("После логина вернитесь сюда и нажмите [bold]Enter[/bold].")
+
+        try:
+            # Ждём OAuth код или ручной ввод
+            for _ in range(300):  # 5 минут
+                page.wait_for_timeout(1000)
+                if auth_code:
+                    break
+            else:
+                if not auth_code:
+                    input("\n>>> Нажмите Enter если залогинились: ")
+        except (EOFError, KeyboardInterrupt):
+            browser.close()
+            return
+
+        browser.close()
+
+    if not auth_code:
+        console.print("[red]Не удалось получить OAuth код.[/red]")
+        return
+
+    client.exchange_code(auth_code)
+    console.print("[green]API авторизация успешна![/green]")
+    console.print("Теперь доступны: [bold]hh-apply whoami[/bold], [bold]hh-apply boost[/bold]")
+
+
+@main.command()
+@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
+def whoami(config):
+    """Проверить аккаунт: ID, имя, резюме, просмотры."""
+    from hh_apply.config import load_config, get_data_dir
+    from hh_apply.api_client import HHApiClient
+
+    console = Console()
+    cfg = load_config(config)
+    data_dir = get_data_dir(cfg)
+    client = HHApiClient(data_dir / "api_token.json")
+
+    if not client.is_authenticated:
+        console.print("[red]Не авторизован. Запустите: hh-apply api-login[/red]")
+        return
+
+    try:
+        me = client.whoami()
+    except Exception as e:
+        console.print(f"[red]Ошибка: {e}[/red]")
+        console.print("Попробуйте: [bold]hh-apply api-login[/bold]")
+        return
+
+    full_name = " ".join(filter(None, [
+        me.get("last_name"),
+        me.get("first_name"),
+        me.get("middle_name"),
+    ])) or "Аноним"
+
+    counters = me.get("counters", {})
+    resumes = counters.get("resumes_count", 0)
+    views = counters.get("new_resume_views", 0)
+    unread = counters.get("unread_negotiations", 0)
+
+    console.print(
+        f"\U0001f194 {me.get('id', '?')} {full_name} "
+        f"[ \U0001f4c4 {resumes} | \U0001f441\ufe0f +{views} | \u2709\ufe0f +{unread} ]"
+    )
+
+
+@main.command()
+@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
+def boost(config):
+    """Поднять все резюме в поиске."""
+    from hh_apply.config import load_config, get_data_dir
+    from hh_apply.api_client import HHApiClient
+
+    console = Console()
+    cfg = load_config(config)
+    data_dir = get_data_dir(cfg)
+    client = HHApiClient(data_dir / "api_token.json")
+
+    if not client.is_authenticated:
+        console.print("[red]Не авторизован. Запустите: hh-apply api-login[/red]")
+        return
+
+    try:
+        resumes = client.get_resumes()
+    except Exception as e:
+        console.print(f"[red]Ошибка: {e}[/red]")
+        return
+
+    if not resumes:
+        console.print("[yellow]Нет резюме[/yellow]")
+        return
+
+    for resume in resumes:
+        status = resume.get("status", {}).get("id", "")
+        if status != "published":
+            console.print(f"[dim]Пропуск (не опубликовано): {resume.get('title', '?')}[/dim]")
+            continue
+
+        if not resume.get("can_publish_or_update"):
+            console.print(f"[yellow]Нельзя обновить: {resume.get('title', '?')}[/yellow]")
+            continue
+
+        try:
+            client.boost_resume(resume["id"])
+            url = resume.get("alternate_url", "")
+            title = resume.get("title", "?")
+            console.print(f"\u2705 Обновлено {url} — {title}")
+        except Exception as e:
+            console.print(f"[red]Ошибка: {e}[/red]")
+
+
+@main.command()
+@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
+@click.option("--csv", "csv_export", is_flag=True, help="Экспорт в CSV")
+@click.option("-o", "--output", type=str, help="Файл для экспорта")
+@click.argument("sql", required=False)
+def query(config, csv_export, output, sql):
+    """SQL-запросы к базе данных."""
+    import csv as csv_module
+    import io
+    from hh_apply.config import load_config, get_db_path
+    from hh_apply.tracker import Tracker
+
+    console = Console()
+    cfg = load_config(config)
+    db_path = get_db_path(cfg)
+
+    if not db_path.exists():
+        console.print("[yellow]База данных не найдена.[/yellow]")
+        return
+
+    if not sql:
+        console.print("[dim]Доступные таблицы: applications, skipped_vacancies[/dim]")
+        console.print("[dim]Пример: hh-apply query \"SELECT * FROM skipped_vacancies WHERE reason='test_required'\"[/dim]")
+        return
+
+    with Tracker(db_path) as tracker:
+        try:
+            columns, rows = tracker.execute_query(sql)
+        except Exception as e:
+            console.print(f"[red]Ошибка SQL: {e}[/red]")
+            return
+
+    if not rows:
+        console.print("[dim]Нет результатов[/dim]")
+        return
+
+    if csv_export:
+        buf = io.StringIO()
+        writer = csv_module.writer(buf)
+        writer.writerow(columns)
+        writer.writerows(rows)
+        csv_text = buf.getvalue()
+
+        if output:
+            Path(output).write_text(csv_text, encoding="utf-8")
+            console.print(f"[green]Экспорт: {output} ({len(rows)} строк)[/green]")
+        else:
+            print(csv_text)
+    else:
+        table = Table(border_style="blue")
+        for col in columns:
+            table.add_column(col)
+        for row in rows:
+            table.add_row(*[str(v) for v in row])
+        console.print(table)
+        console.print(f"[dim]{len(rows)} строк[/dim]")

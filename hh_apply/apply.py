@@ -13,7 +13,7 @@ import time
 from patchright.sync_api import Page
 
 from hh_apply.search import Vacancy
-from hh_apply.notifications import alert_captcha, beep
+from hh_apply.captcha import solve_captcha_interactive, _check_captcha_present
 from hh_apply.stealth import human_mouse_move
 
 STATUS_SENT = "sent"
@@ -312,28 +312,12 @@ def _click_submit(page: Page) -> bool:
 
 
 def _check_captcha(page: Page) -> bool:
-    return page.evaluate("""
-        () => {
-            const sel = ['iframe[src*="captcha"]', '[class*="captcha"]',
-                         'img[src*="captcha"]', '[data-qa="captcha"]'];
-            for (const s of sel) { if (document.querySelector(s)) return true; }
-            return document.body.innerText.includes('Подтвердите, что вы не робот');
-        }
-    """)
+    return _check_captcha_present(page)
 
 
 def _handle_captcha(page: Page) -> str:
-    """Ждёт решения капчи со звуковым уведомлением."""
-    alert_captcha()
-
-    for i in range(60):  # 2 минуты
-        page.wait_for_timeout(2000)
-        if not _check_captcha(page):
-            return STATUS_CAPTCHA
-        # Повторяем сигнал каждые 10 сек
-        if i % 5 == 0:
-            beep()
-
+    """Интерактивное решение капчи: картинка в терминале + ввод."""
+    solved = solve_captcha_interactive(page)
     return STATUS_CAPTCHA
 
 
