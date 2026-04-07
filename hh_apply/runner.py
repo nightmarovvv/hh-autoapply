@@ -125,6 +125,7 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                     _handle_captcha(page)
 
                 sent = 0
+                skipped = 0
                 processed = 0  # Общий счётчик (для dry-run лимита)
                 page_num = 0
                 max_pages = 30
