@@ -44,9 +44,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/username/hh-apply"
-Repository = "https://github.com/username/hh-apply"
-Issues = "https://github.com/username/hh-apply/issues"
+Homepage = "https://github.com/nightmarovvv/hh-autoapply"
+Repository = "https://github.com/nightmarovvv/hh-autoapply"
+Issues = "https://github.com/nightmarovvv/hh-autoapply/issues"
 
 [project.scripts]
 hh-apply = "hh_apply.cli:main"

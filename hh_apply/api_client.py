@@ -44,7 +44,6 @@ class HHApiClient:
     def __init__(self, token_path: "str | Path"):
         self.token_path = Path(token_path)
         self.session = requests.Session()
-        self.session.verify = False
         self.user_agent = generate_android_ua()
         self.access_token = None
         self.refresh_token = None

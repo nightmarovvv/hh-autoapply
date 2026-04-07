@@ -21,7 +21,7 @@ from hh_apply.search import (
     do_search, collect_vacancy_ids_from_page, go_next_page, dismiss_ads,
     sort_vacancies_fresh_first, count_search_results,
 )
-from hh_apply.apply import apply_to_vacancy, human_delay, _check_captcha, _handle_captcha
+from hh_apply.apply import apply_to_vacancy, human_delay, _check_captcha, _handle_captcha, _dismiss_popups
 from hh_apply.api_apply import check_vacancy_type
 from hh_apply.tracker import Tracker
 from hh_apply.filters import should_skip_vacancy
@@ -288,7 +288,10 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                                 continue
 
                             # API-проверка типа
-                            info = check_vacancy_type(page, vacancy.vacancy_id)
+                            try:
+                                info = check_vacancy_type(page, vacancy.vacancy_id)
+                            except Exception:
+                                info = {"type": "unknown"}
                             vtype = info.get("type", "unknown")
 
                             # Лимит откликов
@@ -308,11 +311,11 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                                 skipped += 1
                                 continue
                             if vtype == "already-applied":
+                                tracker.record(vacancy.vacancy_id, vacancy.title, vacancy.company, "already_applied")
                                 skipped += 1
                                 continue
 
                             # Закрываем попапы ПЕРЕД откликом
-                            from hh_apply.apply import _dismiss_popups
                             _dismiss_popups(page)
 
                             status = _retry_apply(page, vacancy, cover_letter, use_cover_letter, skip_foreign)

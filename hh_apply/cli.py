@@ -901,9 +901,17 @@ def _schedule_set(time_str: str, config_path: str, weekdays: bool, console: Cons
         return
 
     hour, minute = parts[0], parts[1]
+    try:
+        h, m = int(hour), int(minute)
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError
+    except ValueError:
+        console.print("[red]Некорректное время. Формат: HH:MM (напр. 09:00)[/red]")
+        return
+
     dow = "1-5" if weekdays else "*"
     config_abs = str(Path(config_path).resolve())
-    cmd = f"cd {Path.cwd()} && hh-apply run --headless -c {config_abs}"
+    cmd = f'cd "{Path.cwd()}" && hh-apply run --headless -c "{config_abs}"'
     cron_line = f"{minute} {hour} * * {dow} {cmd}"
 
     # Добавляем в crontab
@@ -928,8 +936,12 @@ def _schedule_boost(hours: int, config_path: str, console: Console) -> None:
     """Добавляет cron-задачу для hh-apply boost."""
     import subprocess
 
+    if hours < 1 or hours > 24:
+        console.print("[red]Интервал: от 1 до 24 часов.[/red]")
+        return
+
     config_abs = str(Path(config_path).resolve())
-    cmd = f"cd {Path.cwd()} && hh-apply boost -c {config_abs}"
+    cmd = f'cd "{Path.cwd()}" && hh-apply boost -c "{config_abs}"'
     cron_line = f"0 */{hours} * * * {cmd}"
 
     try:
@@ -1035,6 +1047,12 @@ def query(config, csv_export, output, sql):
 
     if not sql:
         console.print("[dim]Таблицы: applications, skipped_vacancies[/dim]")
+        console.print('[dim]Пример: hh-apply query "SELECT * FROM applications"[/dim]')
+        return
+
+    # Защита от случайного DELETE/DROP
+    if not sql.strip().upper().startswith("SELECT"):
+        console.print("[red]Разрешены только SELECT запросы.[/red]")
         console.print('[dim]Пример: hh-apply query "SELECT * FROM applications"[/dim]')
         return
 

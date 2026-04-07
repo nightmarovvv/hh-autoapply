@@ -36,7 +36,8 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
     try:
         original_url = page.url
 
-        btn_info = page.evaluate(f"""
+        try:
+            btn_info = page.evaluate(f"""
             () => {{
                 const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
                 for (const card of cards) {{
@@ -54,6 +55,8 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                 return {{status: 'not_found'}};
             }}
         """)
+        except Exception:
+            return STATUS_ERROR
 
         status = btn_info.get("status", "error")
 
@@ -341,11 +344,7 @@ def _fill_and_submit(page: Page, vacancy: Vacancy, cover_letter: str, letter_inp
         return STATUS_ERROR
 
     page.wait_for_timeout(3000)
-
-    if _check_sent(page):
-        return STATUS_COVER_LETTER
-
-    return STATUS_COVER_LETTER
+    return STATUS_COVER_LETTER if _check_sent(page) else STATUS_ERROR
 
 
 def _submit_modal(page: Page, vacancy: Vacancy) -> str:
@@ -355,11 +354,7 @@ def _submit_modal(page: Page, vacancy: Vacancy) -> str:
         return STATUS_ERROR
 
     page.wait_for_timeout(3000)
-
-    if _check_sent(page):
-        return STATUS_SENT
-
-    return STATUS_SENT
+    return STATUS_SENT if _check_sent(page) else STATUS_ERROR
 
 
 def _click_submit(page: Page) -> bool:
