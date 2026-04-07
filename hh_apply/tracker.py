@@ -22,7 +22,16 @@ class Tracker:
     def __init__(self, db_path: "str | Path"):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.db_path = str(db_path)
-        self.conn = sqlite3.connect(self.db_path)
+        try:
+            self.conn = sqlite3.connect(self.db_path, timeout=10)
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                raise RuntimeError(
+                    f"База данных заблокирована: {db_path}\n"
+                    "Возможно, запущен другой экземпляр hh-apply. "
+                    "Закройте его и попробуйте снова."
+                ) from e
+            raise
         self._init_db()
 
     def __enter__(self):
