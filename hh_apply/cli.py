@@ -51,11 +51,36 @@ EMPLOYMENT_OPTIONS = {
 }
 
 
-@click.group()
+HELP_TEXT = """
+[bold blue]hh-apply[/bold blue] — массовые автоотклики на hh.ru
+
+[bold]Начало работы:[/bold]
+  hh-apply init        Настроить поиск и фильтры
+  hh-apply login       Войти в hh.ru (откроется браузер)
+  hh-apply run         Запустить отклики
+
+[bold]Дополнительно:[/bold]
+  hh-apply boost       Поднять резюме в поиске
+  hh-apply whoami      Проверить аккаунт
+  hh-apply stats       Статистика откликов
+  hh-apply query       SQL-запросы к базе
+
+[bold]Опции run:[/bold]
+  --limit 50           Максимум откликов
+  --dry-run            Только посмотреть, не откликаться
+  --exclude "regex"    Исключить вакансии по regex
+  --headless           Без окна браузера
+"""
+
+
+@click.group(invoke_without_command=True)
 @click.version_option(__version__, prog_name="hh-apply")
-def main():
-    """hh-apply — автоматические отклики на вакансии hh.ru"""
-    pass
+@click.pass_context
+def main(ctx):
+    """hh-apply — массовые автоматические отклики на вакансии hh.ru"""
+    if ctx.invoked_subcommand is None:
+        console = Console()
+        console.print(HELP_TEXT)
 
 
 @main.command()
@@ -291,7 +316,16 @@ def login(config):
 @click.option("--report", "-r", type=str, help="Сохранить отчёт в файл")
 @click.option("--exclude", "-e", type=str, help="Regex для исключения вакансий (напр. junior|стажёр)")
 def run(config, limit, headless, dry_run, report, exclude):
-    """Запустить автоотклики."""
+    """Запустить автоотклики.
+
+    \b
+    Примеры:
+      hh-apply run                        # Запуск с настройками из config.yaml
+      hh-apply run --limit 10             # Максимум 10 откликов
+      hh-apply run --dry-run              # Только посмотреть вакансии
+      hh-apply run -e "junior|стажёр"     # Исключить по regex
+      hh-apply run --limit 5 --dry-run    # Посмотреть 5 вакансий
+    """
     from hh_apply.config import load_config
     from hh_apply.runner import run as do_run
 
@@ -303,6 +337,32 @@ def run(config, limit, headless, dry_run, report, exclude):
         return
 
     cfg = load_config(config)
+
+    # Интерактивный режим — если не передали ни одного аргумента
+    has_any_option = any([limit, headless, dry_run, report, exclude])
+    if not has_any_option:
+        console.print("[bold blue]hh-apply run[/bold blue] — интерактивный режим\n")
+
+        # Лимит
+        limit_input = Prompt.ask(
+            "  Сколько откликов? (Enter = из конфига)",
+            default="", console=console,
+        )
+        if limit_input.strip().isdigit():
+            limit = int(limit_input.strip())
+
+        # Dry run
+        dry_run = Confirm.ask("  Пробный режим (без откликов)?", default=False, console=console)
+
+        # Exclude
+        exclude_input = Prompt.ask(
+            "  Исключить вакансии по regex? (Enter = пропустить)",
+            default="", console=console,
+        )
+        if exclude_input.strip():
+            exclude = exclude_input.strip()
+
+        console.print()
 
     if limit:
         cfg["apply"]["max_applications"] = limit
@@ -430,7 +490,12 @@ def api_login(config):
 @main.command()
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def whoami(config):
-    """Проверить аккаунт: ID, имя, резюме, просмотры."""
+    """Проверить аккаунт: ID, имя, резюме, просмотры.
+
+    \b
+    Требует предварительной OAuth-авторизации:
+      hh-apply api-login
+    """
     from hh_apply.config import load_config, get_data_dir
     from hh_apply.api_client import HHApiClient
 
@@ -470,7 +535,12 @@ def whoami(config):
 @main.command()
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def boost(config):
-    """Поднять все резюме в поиске."""
+    """Поднять все резюме в поиске.
+
+    \b
+    Поднимает резюме наверх в выдаче рекрутеров.
+    Требует: hh-apply api-login
+    """
     from hh_apply.config import load_config, get_data_dir
     from hh_apply.api_client import HHApiClient
 
@@ -518,7 +588,15 @@ def boost(config):
 @click.option("-o", "--output", type=str, help="Файл для экспорта")
 @click.argument("sql", required=False)
 def query(config, csv_export, output, sql):
-    """SQL-запросы к базе данных."""
+    """SQL-запросы к базе данных.
+
+    \b
+    Примеры:
+      hh-apply query                                              # Показать подсказку
+      hh-apply query "SELECT * FROM applications"                 # Все отклики
+      hh-apply query "SELECT * FROM skipped_vacancies"            # Пропущенные
+      hh-apply query "SELECT * FROM applications" --csv -o f.csv  # Экспорт CSV
+    """
     import csv as csv_module
     import io
     from hh_apply.config import load_config, get_db_path

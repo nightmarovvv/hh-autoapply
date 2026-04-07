@@ -238,6 +238,12 @@ def _handle_redirect(page: Page, vacancy: Vacancy, original_url: str) -> str:
         page.wait_for_timeout(2000)
         return STATUS_TEST_REQUIRED
 
+    # Чат робота-рекрутера — отклик уже ушёл, просто возвращаемся
+    if "/negotiations" in current or "/chat" in current:
+        page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
+        page.wait_for_timeout(2000)
+        return STATUS_SENT
+
     if "vacancy_response" in current:
         if _check_sent(page):
             page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
