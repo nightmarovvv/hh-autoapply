@@ -125,12 +125,12 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                     _handle_captcha(page)
 
                 sent = 0
-                skipped = 0
+                processed = 0  # Общий счётчик (для dry-run лимита)
                 page_num = 0
                 max_pages = 30
                 limit_exceeded = False
 
-                while sent < max_apps and page_num < max_pages and not shutdown and not limit_exceeded:
+                while sent < max_apps and processed < max_apps and page_num < max_pages and not shutdown and not limit_exceeded:
                     dismiss_ads(page)
                     vacancies = collect_vacancy_ids_from_page(page)
 
@@ -143,7 +143,7 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                     new = [v for v in vacancies if not tracker.is_applied(v.vacancy_id)]
 
                     for vacancy in new:
-                        if sent >= max_apps or shutdown or limit_exceeded:
+                        if sent >= max_apps or processed >= max_apps or shutdown or limit_exceeded:
                             break
 
                         # Session check каждые 15 откликов
@@ -165,7 +165,7 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                         if dry_run:
                             info = check_vacancy_type(page, vacancy.vacancy_id)
                             console.print(f"  [dim]{vacancy.title[:50]:50s} | {info.get('type','?')}[/dim]")
-                            skipped += 1
+                            processed += 1
                             continue
 
                         # API-проверка типа
@@ -200,15 +200,14 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
 
                         if status in ("sent", "cover_letter_sent"):
                             sent += 1
-                        else:
-                            skipped += 1
+                        processed += 1
 
                         if _check_captcha(page):
                             _handle_captcha(page)
 
                         human_delay(delay_min, delay_max)
 
-                    if sent >= max_apps or shutdown or limit_exceeded:
+                    if sent >= max_apps or processed >= max_apps or shutdown or limit_exceeded:
                         break
 
                     try:

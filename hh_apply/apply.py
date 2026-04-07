@@ -119,6 +119,9 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                 if p != page:
                     p.close()
 
+        # Закрываем чат робота-рекрутера и другие попапы
+        _dismiss_popups(page)
+
         # Проверяем редирект
         if page.url != original_url:
             return _handle_redirect(page, vacancy, original_url)
@@ -329,6 +332,31 @@ def _close_modal(page: Page) -> None:
         }
     """)
     page.wait_for_timeout(500)
+
+
+def _dismiss_popups(page) -> None:
+    """Закрывает чат робота-рекрутера, модалки, оверлеи после отклика."""
+    page.evaluate("""
+        () => {
+            // Чат-бот рекрутера (появляется сразу после отклика)
+            const chatClose = document.querySelectorAll(
+                '[data-qa="chatbot-close"], [data-qa="chat-close"], ' +
+                '[class*="chatbot"] [class*="close"], [class*="chat-widget"] [class*="close"], ' +
+                '[data-qa="bloko-modal-close"]'
+            );
+            chatClose.forEach(el => { try { el.click(); } catch(e) {} });
+
+            // Общие close-кнопки попапов
+            document.querySelectorAll(
+                '[class*="popup"] [class*="close"], [class*="overlay"] [class*="close"], ' +
+                '[class*="modal"] [class*="close"]:not([data-qa="vacancy-response-popup-form-letter-input"])'
+            ).forEach(el => {
+                if (el.offsetParent && el.offsetWidth > 0) {
+                    try { el.click(); } catch(e) {}
+                }
+            });
+        }
+    """)
 
 
 def human_delay(delay_min: float, delay_max: float) -> None:
