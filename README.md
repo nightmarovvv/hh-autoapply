@@ -82,39 +82,7 @@ sudo apt update && sudo apt install -y python3 python3-pip python3-venv
 
 ---
 
-### Шаг 2. Проверьте Git
-
-Git нужен чтобы скачать hh-apply с GitHub.
-
-```bash
-git --version
-```
-
-Если показывает версию — переходите к **Шагу 3**.
-
-<details>
-<summary><b>Как установить Git</b></summary>
-
-**macOS:**
-```bash
-brew install git
-```
-
-**Windows:**
-1. Откройте [git-scm.com/download/win](https://git-scm.com/download/win) — скачивание начнётся автоматически
-2. Запустите установщик, нажимайте **Next** во всех окнах, в конце **Install**
-3. **Закройте PowerShell и откройте заново**
-
-**Linux:**
-```bash
-sudo apt install -y git
-```
-
-</details>
-
----
-
-### Шаг 3. Установите hh-apply
+### Шаг 2. Установите hh-apply
 
 macOS / Linux:
 ```bash
@@ -128,9 +96,36 @@ pip install git+https://github.com/nightmarovvv/hh-autoapply.git
 
 > Побегут строки — это скачивание. Дождитесь `Successfully installed`.
 
+Если пишет `pip: command not found` или `pip не является командой`:
+
+<details>
+<summary><b>Как исправить</b></summary>
+
+**macOS / Linux** — попробуйте так:
+```bash
+python3 -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
+```
+
+Если и это не работает — pip не установлен:
+```bash
+python3 -m ensurepip --upgrade
+```
+И повторите установку.
+
 ---
 
-### Шаг 4. Скачайте браузер
+**Windows** — попробуйте так:
+```
+python -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
+```
+
+Если и это не работает — Python установлен без pip. Удалите Python через **Параметры → Приложения**, скачайте заново с [python.org](https://www.python.org/downloads/) и при установке поставьте все галочки.
+
+</details>
+
+---
+
+### Шаг 3. Скачайте браузер
 
 hh-apply работает через скрытый браузер Chromium. Его нужно скачать один раз:
 
@@ -140,9 +135,26 @@ patchright install chromium
 
 > На Linux также выполните: `patchright install-deps chromium`
 
+Если пишет `patchright: command not found`:
+
+<details>
+<summary><b>Как исправить</b></summary>
+
+macOS / Linux:
+```bash
+python3 -m patchright install chromium
+```
+
+Windows:
+```
+python -m patchright install chromium
+```
+
+</details>
+
 ---
 
-### Шаг 5. Проверьте
+### Шаг 4. Проверьте
 
 ```bash
 hh-apply --version
