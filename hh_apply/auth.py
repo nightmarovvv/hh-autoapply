@@ -89,6 +89,51 @@ def _click_submit(page: Page) -> bool:
     return False
 
 
+# Кнопки которые нужно нажать чтобы попасть на форму логина
+LOGIN_PAGE_ENTRY_SELECTORS = [
+    '[data-qa="login"]',
+    '[data-qa="account-login"]',
+    'a[href*="/account/login"]',
+    'button:has-text("Войти")',
+    'a:has-text("Войти")',
+]
+
+
+def _navigate_to_login_form(page: Page, console: Console) -> bool:
+    """Открывает hh.ru и добирается до формы ввода телефона/email.
+
+    hh.ru может показать главную страницу где нужно сначала нажать "Войти",
+    а потом уже появится форма. Обрабатываем это.
+    """
+    try:
+        page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
+    except Exception:
+        console.print("[yellow]Страница загружается медленно...[/yellow]")
+
+    page.wait_for_timeout(2000)
+
+    # Проверяем — уже на странице с полем ввода?
+    phone_input = _find_element(page, PHONE_INPUT_SELECTORS, timeout=2000)
+    if phone_input:
+        return True
+
+    # Нет поля — ищем кнопку "Войти" и кликаем
+    entry_btn = _find_element(page, LOGIN_PAGE_ENTRY_SELECTORS, timeout=3000)
+    if entry_btn:
+        entry_btn.click()
+        page.wait_for_timeout(3000)
+
+    # Пробуем ещё раз перейти напрямую
+    if not _find_element(page, PHONE_INPUT_SELECTORS, timeout=2000):
+        try:
+            page.goto("https://hh.ru/account/login?backurl=%2F", timeout=30000, wait_until="domcontentloaded")
+            page.wait_for_timeout(2000)
+        except Exception:
+            pass
+
+    return _find_element(page, PHONE_INPUT_SELECTORS, timeout=3000) is not None
+
+
 def _check_login_error(page: Page) -> str | None:
     """Проверяет наличие ошибки на странице логина."""
     error_selectors = [
@@ -134,12 +179,12 @@ def login_manual(page: Page, console: Console) -> bool:
 
 def login_phone(page: Page, console: Console) -> bool:
     """Логин по номеру телефона + SMS-код из терминала."""
-    try:
-        page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
-    except Exception:
-        console.print("[yellow]Страница загружается медленно...[/yellow]")
+    console.print("[dim]Открываю страницу логина...[/dim]")
 
-    page.wait_for_timeout(2000)
+    if not _navigate_to_login_form(page, console):
+        console.print("[red]Не удалось открыть форму логина.[/red]")
+        console.print("[dim]Попробуйте 'Сам в браузере'.[/dim]")
+        return False
 
     # 1. Ввод номера телефона
     try:
@@ -218,12 +263,12 @@ def login_phone(page: Page, console: Console) -> bool:
 
 def login_password(page: Page, console: Console) -> bool:
     """Логин по email + паролю из терминала."""
-    try:
-        page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
-    except Exception:
-        console.print("[yellow]Страница загружается медленно...[/yellow]")
+    console.print("[dim]Открываю страницу логина...[/dim]")
 
-    page.wait_for_timeout(2000)
+    if not _navigate_to_login_form(page, console):
+        console.print("[red]Не удалось открыть форму логина.[/red]")
+        console.print("[dim]Попробуйте 'Сам в браузере'.[/dim]")
+        return False
 
     # Переключаемся на вкладку "По паролю" если есть
     password_tab = _find_element(page, PASSWORD_TAB_SELECTORS, timeout=3000)
@@ -365,11 +410,14 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
     return browser, context
 
 
-def create_login_context(playwright: Playwright, config: dict) -> tuple:
+def create_login_context(playwright: Playwright, config: dict, headless: bool = False) -> tuple:
     """Создаёт persistent browser context для логина.
 
     Persistent context = реальный профиль браузера с сохранением на диск.
     Выглядит как настоящий Chrome, не палится антиботами hh.ru.
+
+    headless=True для автоматического логина (телефон, пароль) — браузер скрыт.
+    headless=False для ручного логина — пользователь видит браузер.
 
     Возвращает (browser=None, context).
     Закрывать через context.close().
@@ -383,7 +431,7 @@ def create_login_context(playwright: Playwright, config: dict) -> tuple:
 
     context = playwright.chromium.launch_persistent_context(
         user_data_dir=profile_dir,
-        headless=False,
+        headless=headless,
         args=["--no-first-run", "--no-default-browser-check"],
         viewport=random_viewport(),
         locale="ru-RU",
