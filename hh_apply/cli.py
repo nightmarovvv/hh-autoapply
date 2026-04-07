@@ -342,14 +342,16 @@ def _validate_config_search(config: dict, console: Console) -> None:
 
 @main.command(epilog="""
 Примеры:
-  hh-apply login                 Войти с config.yaml
+  hh-apply login                 Войти (выбор способа)
   hh-apply login -c qa.yaml     Войти с другим конфигом
 """)
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def login(config):
     """Войти в hh.ru и сохранить сессию."""
     from hh_apply.config import load_config, get_storage_path
-    from hh_apply.auth import create_login_context, check_logged_in
+    from hh_apply.auth import (
+        create_login_context, login_manual, login_phone, login_password,
+    )
     from patchright.sync_api import sync_playwright
 
     console = Console()
@@ -365,51 +367,47 @@ def login(config):
 
     console.print("[bold blue]hh-apply login[/bold blue]\n")
 
-    with sync_playwright() as pw:
-        # Persistent context = реальный профиль браузера.
-        # Обычный context на Windows зависает при логине на hh.ru.
-        browser, context = create_login_context(pw, cfg)
+    method = inquirer.select(
+        message="Как войти?",
+        choices=[
+            "По номеру телефона (SMS-код)",
+            "По email и паролю",
+            "Сам в браузере (откроется hh.ru)",
+        ],
+        default="По номеру телефона (SMS-код)",
+    ).execute()
 
-        # persistent context уже имеет дефолтную страницу
+    LOGIN_METHODS = {
+        "По номеру телефона (SMS-код)": login_phone,
+        "По email и паролю": login_password,
+        "Сам в браузере (откроется hh.ru)": login_manual,
+    }
+
+    login_fn = LOGIN_METHODS[method]
+
+    with sync_playwright() as pw:
+        browser, context = create_login_context(pw, cfg)
         page = context.pages[0] if context.pages else context.new_page()
 
         try:
-            page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
-        except Exception:
-            console.print("[yellow]Страница загружается медленно, но браузер открыт.[/yellow]")
+            success = login_fn(page, console)
 
-        console.print("Браузер открыт. Залогиньтесь на hh.ru.")
-        console.print("Не торопитесь — введите код, дождитесь загрузки.\n")
-
-        try:
-            input(">>> Нажмите Enter когда залогинитесь: ")
+            if success:
+                context.storage_state(path=str(storage_path))
+                console.print(f"\n[green]Сессия сохранена![/green]")
+                console.print("\n[bold]Следующий шаг:[/bold]")
+                console.print("  [bold]hh-apply run --dry-run[/bold] — пробный запуск")
+                console.print("  [bold]hh-apply run[/bold]           — боевые отклики")
+            else:
+                console.print("\n[red]Логин не подтверждён.[/red]")
+                console.print("[dim]Попробуйте другой способ входа.[/dim]")
         except (EOFError, KeyboardInterrupt):
             console.print("\n[yellow]Прервано[/yellow]")
+        finally:
             try:
                 context.close()
             except Exception:
                 pass
-            sys.exit(1)
-
-        try:
-            page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(2000)
-        except Exception:
-            pass
-
-        if check_logged_in(page):
-            context.storage_state(path=str(storage_path))
-            console.print(f"\n[green]Сессия сохранена![/green]")
-            console.print("\n[bold]Следующий шаг:[/bold]")
-            console.print("  [bold]hh-apply run --dry-run[/bold] — пробный запуск")
-            console.print("  [bold]hh-apply run[/bold]           — боевые отклики")
-        else:
-            console.print("\n[red]Логин не подтверждён.[/red]")
-
-        try:
-            context.close()
-        except Exception:
-            pass
 
 
 # ==================== RUN ====================
