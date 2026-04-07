@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from patchright.sync_api import Page
 
@@ -15,6 +15,8 @@ class Vacancy:
     title: str
     company: str
     url: str
+    salary: str | None = None
+    published_date: str | None = None
 
 
 def do_search(page: Page, config: dict) -> None:
@@ -42,6 +44,8 @@ def collect_vacancy_ids_from_page(page: Page) -> list[Vacancy]:
                 const titleEl = card.querySelector('[data-qa="serp-item__title"]');
                 const companyEl = card.querySelector('[data-qa="vacancy-serp__vacancy-employer"]');
                 const btnEl = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                const salaryEl = card.querySelector('[data-qa="vacancy-serp__vacancy-compensation"]');
+                const dateEl = card.querySelector('[data-qa="vacancy-serp__vacancy-date"]');
 
                 if (!titleEl) return null;
 
@@ -52,9 +56,11 @@ def collect_vacancy_ids_from_page(page: Page) -> list[Vacancy]:
                 return {
                     vacancy_id: match[1],
                     title: titleEl.textContent.trim(),
-                    company: companyEl ? companyEl.textContent.trim() : '—',
+                    company: companyEl ? companyEl.textContent.trim() : '\u2014',
                     has_apply_btn: !!btnEl,
                     btn_text: btnEl ? btnEl.textContent.trim() : '',
+                    salary: salaryEl ? salaryEl.textContent.trim() : null,
+                    published_date: dateEl ? dateEl.textContent.trim() : null,
                 };
             }).filter(Boolean);
         }
@@ -72,9 +78,42 @@ def collect_vacancy_ids_from_page(page: Page) -> list[Vacancy]:
             title=item["title"],
             company=item["company"],
             url=f"https://hh.ru/vacancy/{item['vacancy_id']}",
+            salary=item.get("salary"),
+            published_date=item.get("published_date"),
         ))
 
     return vacancies
+
+
+def sort_vacancies_fresh_first(vacancies: list[Vacancy]) -> list[Vacancy]:
+    """Сортирует вакансии — свежие (сегодня/вчера) первыми."""
+    today_words = ("сегодня", "только что", "час назад", "минут назад")
+
+    def freshness_key(v: Vacancy) -> int:
+        if not v.published_date:
+            return 2
+        date_lower = v.published_date.lower()
+        if any(w in date_lower for w in today_words):
+            return 0
+        if "вчера" in date_lower:
+            return 1
+        return 2
+
+    return sorted(vacancies, key=freshness_key)
+
+
+def count_search_results(page: Page) -> int | None:
+    """Считает общее количество найденных вакансий со страницы поиска."""
+    count = page.evaluate("""
+        () => {
+            const el = document.querySelector('[data-qa="vacancies-total-count"]');
+            if (!el) return null;
+            const text = el.textContent.replace(/\\s/g, '');
+            const match = text.match(/(\\d+)/);
+            return match ? parseInt(match[1]) : null;
+        }
+    """)
+    return count
 
 
 def go_next_page(page: Page) -> bool:

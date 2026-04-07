@@ -15,6 +15,7 @@ from patchright.sync_api import Page
 from hh_apply.search import Vacancy
 from hh_apply.captcha import solve_captcha_interactive, _check_captcha_present
 from hh_apply.stealth import human_mouse_move
+from hh_apply.config import render_cover_letter
 
 STATUS_SENT = "sent"
 STATUS_COVER_LETTER = "cover_letter_sent"
@@ -315,9 +316,10 @@ def _check_sent(page: Page) -> bool:
 
 
 def _fill_and_submit(page: Page, vacancy: Vacancy, cover_letter: str, letter_input) -> str:
+    rendered = render_cover_letter(cover_letter, vacancy)
     letter_input.click()
     page.wait_for_timeout(200)
-    letter_input.fill(cover_letter)
+    letter_input.fill(rendered)
     page.wait_for_timeout(500)
 
     submitted = _click_submit(page)

@@ -6,7 +6,7 @@ import re
 from urllib.parse import urlencode
 
 
-# Маппинг параметров конфига → GET-параметры hh.ru
+# Маппинг параметров конфига -> GET-параметры hh.ru
 EXPERIENCE_MAP = {
     "noExperience": "noExperience",
     "between1And3": "between1And3",
@@ -100,12 +100,21 @@ def should_skip_vacancy(vacancy, filters_config: dict) -> "str | None":
     title_lower = vacancy.title.lower()
     company_lower = vacancy.company.lower()
 
-    # Regex exclude
+    # Regex exclude по названию вакансии
     pattern = filters_config.get("exclude_pattern", "")
     if pattern:
         try:
             if re.search(pattern, vacancy.title, re.IGNORECASE):
                 return f"regex: {pattern}"
+        except re.error:
+            pass
+
+    # Regex exclude по компании
+    company_pattern = filters_config.get("exclude_company_pattern", "")
+    if company_pattern:
+        try:
+            if re.search(company_pattern, vacancy.company, re.IGNORECASE):
+                return f"компания regex: {company_pattern}"
         except re.error:
             pass
 

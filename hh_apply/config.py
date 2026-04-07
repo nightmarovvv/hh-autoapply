@@ -22,6 +22,8 @@ DEFAULTS = {
     "filters": {
         "exclude_companies": [],
         "exclude_keywords": [],
+        "exclude_pattern": "",
+        "exclude_company_pattern": "",
         "skip_foreign": False,
         "skip_test_vacancies": True,
     },
@@ -37,6 +39,13 @@ DEFAULTS = {
         "proxy": None,
         "data_dir": "~/.hh-apply",
     },
+}
+
+# Переменные для подстановки в cover letter
+COVER_LETTER_VARS = {
+    "{company}": "Название компании",
+    "{position}": "Название вакансии",
+    "{salary}": "Зарплата (если указана)",
 }
 
 
@@ -57,6 +66,16 @@ def load_config(path: "str | Path") -> dict:
     config["browser"]["data_dir"] = str(data_dir)
 
     return config
+
+
+def render_cover_letter(template: str, vacancy) -> str:
+    """Подставляет переменные {company}, {position}, {salary} в шаблон письма."""
+    text = template
+    text = text.replace("{company}", getattr(vacancy, "company", "") or "")
+    text = text.replace("{position}", getattr(vacancy, "title", "") or "")
+    salary = getattr(vacancy, "salary", None)
+    text = text.replace("{salary}", salary if salary else "не указана")
+    return text
 
 
 def get_data_dir(config: dict) -> Path:

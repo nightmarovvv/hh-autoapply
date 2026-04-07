@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -88,6 +91,64 @@ class Tracker:
             {"vacancy_id": r[0], "title": r[1], "company": r[2], "applied_at": r[3]}
             for r in rows
         ]
+
+    def stats_by_day(self, days: int = 7) -> list[dict]:
+        """Возвращает статистику по дням за последние N дней."""
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        rows = self.conn.execute(
+            """SELECT DATE(applied_at) as day, status, COUNT(*) as cnt
+               FROM applications
+               WHERE applied_at >= ?
+               GROUP BY day, status
+               ORDER BY day""",
+            (since,),
+        ).fetchall()
+
+        by_day: dict[str, dict] = {}
+        for day, status, cnt in rows:
+            if day not in by_day:
+                by_day[day] = {"date": day, "sent": 0, "test": 0, "error": 0, "other": 0, "total": 0}
+            if status in SUCCESS_STATUSES:
+                by_day[day]["sent"] += cnt
+            elif status == "test_required":
+                by_day[day]["test"] += cnt
+            elif status == "error":
+                by_day[day]["error"] += cnt
+            else:
+                by_day[day]["other"] += cnt
+            by_day[day]["total"] += cnt
+
+        return list(by_day.values())
+
+    def get_all_applications(self) -> list[dict]:
+        """Возвращает все отклики для экспорта."""
+        rows = self.conn.execute(
+            "SELECT vacancy_id, title, company, status, applied_at FROM applications ORDER BY applied_at DESC"
+        ).fetchall()
+        return [
+            {"vacancy_id": r[0], "title": r[1], "company": r[2], "status": r[3], "applied_at": r[4]}
+            for r in rows
+        ]
+
+    def export_csv(self, path: "str | Path") -> int:
+        """Экспортирует все отклики в CSV. Возвращает количество строк."""
+        apps = self.get_all_applications()
+        if not apps:
+            return 0
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["vacancy_id", "title", "company", "status", "applied_at"])
+            writer.writeheader()
+            writer.writerows(apps)
+        return len(apps)
+
+    def export_json(self, path: "str | Path") -> int:
+        """Экспортирует все отклики в JSON. Возвращает количество строк."""
+        apps = self.get_all_applications()
+        if not apps:
+            return 0
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(apps, f, ensure_ascii=False, indent=2)
+        return len(apps)
 
     # === Skipped Vacancies ===
 

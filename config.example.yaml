@@ -17,6 +17,8 @@ search:
 filters:
   exclude_companies: []           # ["Компания1", "Компания2"]
   exclude_keywords: []            # ["стажёр", "intern"] — в названии вакансии
+  # exclude_pattern: ""           # Regex по названию: "junior|стажёр|bitrix"
+  # exclude_company_pattern: ""   # Regex по компании: "аутсорс|крипто|казино"
   skip_foreign: false             # Пропускать зарубежные
   skip_test_vacancies: true       # Тестовые → в отчёт для ручного отклика
 
@@ -27,9 +29,11 @@ apply:
   cover_letter: |
     Здравствуйте!
 
-    Меня заинтересовала ваша вакансия. Буду рад обсудить детали.
+    Меня заинтересовала вакансия {position} в {company}.
+    Буду рад обсудить детали.
 
     С уважением
+  # Доступные переменные: {company}, {position}, {salary}
   delay_min: 1.5                  # Мин. задержка между откликами (сек)
   delay_max: 4.0                  # Макс. задержка
 

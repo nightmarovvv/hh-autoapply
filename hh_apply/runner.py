@@ -1,16 +1,26 @@
-"""Оркестратор автооткликов — основной цикл с Rich логами."""
+"""Оркестратор автооткликов — основной цикл с Rich Live-прогрессом."""
 
 from __future__ import annotations
 
 import signal
 import sys
+import time
 
 from rich.console import Console
+from rich.live import Live
+from rich.table import Table
+from rich.panel import Panel
+from rich.progress import Progress, BarColumn, TextColumn, SpinnerColumn, MofNCompleteColumn
+from rich.layout import Layout
+from rich.text import Text
 from patchright.sync_api import sync_playwright
 
 from hh_apply.config import get_storage_path, get_db_path
 from hh_apply.auth import create_context, login_if_needed, check_logged_in
-from hh_apply.search import do_search, collect_vacancy_ids_from_page, go_next_page, dismiss_ads
+from hh_apply.search import (
+    do_search, collect_vacancy_ids_from_page, go_next_page, dismiss_ads,
+    sort_vacancies_fresh_first, count_search_results,
+)
 from hh_apply.apply import apply_to_vacancy, human_delay, _check_captcha, _handle_captcha
 from hh_apply.api_apply import check_vacancy_type
 from hh_apply.tracker import Tracker
@@ -18,7 +28,7 @@ from hh_apply.filters import should_skip_vacancy
 from hh_apply.report import SessionReport, print_report, export_report
 
 
-# Эмодзи для логов (как у hh-applicant-tool)
+# Эмодзи для логов
 LOG_ICONS = {
     "sent": "\U0001f4e8",           # 📨
     "cover_letter_sent": "\U0001f4e8",
@@ -54,6 +64,86 @@ STATUS_LABELS = {
     "no_button": "Нет кнопки",
     "captcha": "Капча",
 }
+
+
+class LiveProgress:
+    """Rich Live-дашборд для отображения прогресса откликов."""
+
+    def __init__(self, console: Console, max_apps: int):
+        self.console = console
+        self.max_apps = max_apps
+        self.sent = 0
+        self.tests = 0
+        self.skipped = 0
+        self.errors = 0
+        self.current_vacancy = ""
+        self.current_company = ""
+        self.log_lines: list[Text] = []
+        self.max_log_lines = 12
+
+    def build_display(self) -> Panel:
+        # Счётчики
+        total_processed = self.sent + self.tests + self.skipped + self.errors
+        pct = (self.sent / self.max_apps * 100) if self.max_apps > 0 else 0
+        bar_filled = int(pct / 100 * 30)
+        bar = f"[green]{'█' * bar_filled}[/green][dim]{'░' * (30 - bar_filled)}[/dim]"
+
+        header = (
+            f"  {bar}  [bold green]{self.sent}[/bold green]/{self.max_apps}\n"
+            f"\n"
+            f"  [green]Отправлено: {self.sent}[/green]  "
+            f"[yellow]Тесты: {self.tests}[/yellow]  "
+            f"[dim]Пропущено: {self.skipped}[/dim]  "
+            f"[red]Ошибки: {self.errors}[/red]"
+        )
+
+        if self.current_vacancy:
+            header += f"\n\n  [bold]>> {self.current_vacancy[:55]}[/bold] — [dim]{self.current_company[:25]}[/dim]"
+
+        # Лог последних действий
+        if self.log_lines:
+            header += "\n"
+            for line in self.log_lines[-self.max_log_lines:]:
+                header += f"\n  {line}"
+
+        return Panel(header, title="[bold blue]hh-apply[/bold blue]", border_style="blue")
+
+    def log(self, status: str, vacancy) -> None:
+        icon = LOG_ICONS.get(status, "")
+        color = STATUS_COLORS.get(status, "white")
+        label = STATUS_LABELS.get(status, status)
+        title = vacancy.title[:40] if hasattr(vacancy, 'title') else ""
+        company = vacancy.company[:25] if hasattr(vacancy, 'company') else ""
+        self.log_lines.append(Text.from_markup(
+            f"{icon} [{color}]{label}[/{color}] {title} — {company}"
+        ))
+
+        if status in ("sent", "cover_letter_sent"):
+            self.sent += 1
+        elif status == "test_required":
+            self.tests += 1
+        elif status == "error":
+            self.errors += 1
+        elif status in ("filtered", "already_applied", "extra_steps", "no_button"):
+            self.skipped += 1
+
+    def set_current(self, vacancy) -> None:
+        self.current_vacancy = vacancy.title if hasattr(vacancy, 'title') else ""
+        self.current_company = vacancy.company if hasattr(vacancy, 'company') else ""
+
+
+def _retry_apply(page, vacancy, cover_letter, use_cover_letter, skip_foreign,
+                 max_retries: int = 2) -> str:
+    """Откликается с retry и экспоненциальной задержкой."""
+    last_status = "error"
+    for attempt in range(max_retries + 1):
+        status = apply_to_vacancy(page, vacancy, cover_letter, use_cover_letter, skip_foreign)
+        if status != "error" or attempt >= max_retries:
+            return status
+        last_status = status
+        delay = 2 ** (attempt + 1)  # 2s, 4s
+        time.sleep(delay)
+    return last_status
 
 
 def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
@@ -124,7 +214,12 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                     console.print("[yellow]Капча на странице поиска![/yellow]")
                     _handle_captcha(page)
 
-                search_url = page.url  # Запоминаем URL страницы поиска
+                # Показываем количество найденных вакансий
+                total_found = count_search_results(page)
+                if total_found is not None:
+                    console.print(f"[dim]Найдено вакансий: {total_found}[/dim]\n")
+
+                search_url = page.url
                 sent = 0
                 skipped = 0
                 processed = 0
@@ -132,104 +227,127 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                 max_pages = 30
                 limit_exceeded = False
 
-                while sent < max_apps and processed < max_apps and page_num < max_pages and not shutdown and not limit_exceeded:
-                    dismiss_ads(page)
-                    vacancies = collect_vacancy_ids_from_page(page)
+                # Dry-run: собираем все вакансии в таблицу
+                if dry_run:
+                    _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages)
+                    return
 
-                    if not vacancies:
-                        if not go_next_page(page):
-                            break
-                        page_num += 1
-                        continue
+                # Live progress dashboard
+                progress = LiveProgress(console, max_apps)
 
-                    new = [v for v in vacancies if not tracker.is_applied(v.vacancy_id)]
+                with Live(progress.build_display(), console=console, refresh_per_second=4) as live:
+                    while sent < max_apps and processed < max_apps and page_num < max_pages and not shutdown and not limit_exceeded:
+                        dismiss_ads(page)
+                        vacancies = collect_vacancy_ids_from_page(page)
 
-                    for vacancy in new:
+                        if not vacancies:
+                            if not go_next_page(page):
+                                break
+                            page_num += 1
+                            continue
+
+                        # Приоритизация: свежие вакансии первыми
+                        vacancies = sort_vacancies_fresh_first(vacancies)
+
+                        new = [v for v in vacancies if not tracker.is_applied(v.vacancy_id)]
+
+                        for vacancy in new:
+                            if sent >= max_apps or processed >= max_apps or shutdown or limit_exceeded:
+                                break
+
+                            progress.set_current(vacancy)
+                            live.update(progress.build_display())
+
+                            # Session check каждые 15 откликов
+                            if (sent + skipped) > 0 and (sent + skipped) % 15 == 0:
+                                if not check_logged_in(page):
+                                    # Retry авторизации
+                                    if not login_if_needed(page, config):
+                                        progress.log_lines.append(Text.from_markup("[red]Сессия истекла[/red]"))
+                                        live.update(progress.build_display())
+                                        shutdown = True
+                                        break
+                                    # Вернуться на страницу поиска
+                                    try:
+                                        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+                                        page.wait_for_timeout(2000)
+                                    except Exception:
+                                        pass
+
+                            # Фильтры
+                            skip_reason = should_skip_vacancy(vacancy, filters_config)
+                            if skip_reason:
+                                tracker.save_skipped(vacancy.vacancy_id, vacancy.title, vacancy.company, vacancy.url, "excluded_filter")
+                                report.add(vacancy.vacancy_id, vacancy.title, vacancy.company, "filtered")
+                                progress.log("filtered", vacancy)
+                                live.update(progress.build_display())
+                                skipped += 1
+                                continue
+
+                            # API-проверка типа
+                            info = check_vacancy_type(page, vacancy.vacancy_id)
+                            vtype = info.get("type", "unknown")
+
+                            # Лимит откликов
+                            if vtype == "negotiations-limit-exceeded" or info.get("error") == "negotiations-limit-exceeded":
+                                progress.log_lines.append(Text.from_markup(
+                                    "[yellow bold]Лимит откликов на сегодня исчерпан (200)[/yellow bold]"
+                                ))
+                                live.update(progress.build_display())
+                                limit_exceeded = True
+                                break
+
+                            if vtype == "test-required" and skip_test:
+                                tracker.save_skipped(vacancy.vacancy_id, vacancy.title, vacancy.company, vacancy.url, "test_required")
+                                report.add(vacancy.vacancy_id, vacancy.title, vacancy.company, "test_required")
+                                progress.log("test_required", vacancy)
+                                live.update(progress.build_display())
+                                skipped += 1
+                                continue
+                            if vtype == "already-applied":
+                                skipped += 1
+                                continue
+
+                            status = _retry_apply(page, vacancy, cover_letter, use_cover_letter, skip_foreign)
+                            tracker.record(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
+                            report.add(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
+                            progress.log(status, vacancy)
+                            live.update(progress.build_display())
+
+                            # Сохраняем пропущенные с доп. вопросами
+                            if status == "extra_steps":
+                                tracker.save_skipped(vacancy.vacancy_id, vacancy.title, vacancy.company, vacancy.url, "extra_steps")
+
+                            if status in ("sent", "cover_letter_sent"):
+                                sent += 1
+                            processed += 1
+
+                            # Страховка: если мы не на странице поиска — вернуться
+                            if "/search/vacancy" not in page.url:
+                                try:
+                                    page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+                                    page.wait_for_timeout(2000)
+                                except Exception:
+                                    pass
+
+                            if _check_captcha(page):
+                                _handle_captcha(page)
+
+                            human_delay(delay_min, delay_max)
+
                         if sent >= max_apps or processed >= max_apps or shutdown or limit_exceeded:
                             break
 
-                        # Session check каждые 15 откликов
-                        if (sent + skipped) > 0 and (sent + skipped) % 15 == 0:
-                            if not check_logged_in(page):
-                                console.print("[red]Сессия истекла.[/red]")
-                                shutdown = True
+                        try:
+                            if not go_next_page(page):
                                 break
-
-                        # Фильтры
-                        skip_reason = should_skip_vacancy(vacancy, filters_config)
-                        if skip_reason:
-                            tracker.save_skipped(vacancy.vacancy_id, vacancy.title, vacancy.company, vacancy.url, "excluded_filter")
-                            report.add(vacancy.vacancy_id, vacancy.title, vacancy.company, "filtered")
-                            _log_action(console, "filtered", vacancy)
-                            skipped += 1
-                            continue
-
-                        if dry_run:
-                            info = check_vacancy_type(page, vacancy.vacancy_id)
-                            console.print(f"  [dim]{vacancy.title[:50]:50s} | {info.get('type','?')}[/dim]")
-                            processed += 1
-                            continue
-
-                        # API-проверка типа
-                        info = check_vacancy_type(page, vacancy.vacancy_id)
-                        vtype = info.get("type", "unknown")
-
-                        # Лимит откликов
-                        if vtype == "negotiations-limit-exceeded" or info.get("error") == "negotiations-limit-exceeded":
-                            console.print("\n[yellow bold]⚠️  Лимит откликов на сегодня исчерпан (200).[/yellow bold]")
-                            console.print("[dim]Попробуйте завтра.[/dim]\n")
-                            limit_exceeded = True
+                        except Exception:
                             break
 
-                        if vtype == "test-required" and skip_test:
-                            tracker.save_skipped(vacancy.vacancy_id, vacancy.title, vacancy.company, vacancy.url, "test_required")
-                            report.add(vacancy.vacancy_id, vacancy.title, vacancy.company, "test_required")
-                            _log_action(console, "test_required", vacancy)
-                            skipped += 1
-                            continue
-                        if vtype == "already-applied":
-                            skipped += 1
-                            continue
-
-                        status = apply_to_vacancy(page, vacancy, cover_letter, use_cover_letter, skip_foreign)
-                        tracker.record(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
-                        report.add(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
-                        _log_action(console, status, vacancy)
-
-                        # Сохраняем пропущенные с доп. вопросами
-                        if status == "extra_steps":
-                            tracker.save_skipped(vacancy.vacancy_id, vacancy.title, vacancy.company, vacancy.url, "extra_steps")
-
-                        if status in ("sent", "cover_letter_sent"):
-                            sent += 1
-                        processed += 1
-
-                        # Страховка: если мы не на странице поиска — вернуться
-                        if "/search/vacancy" not in page.url:
-                            try:
-                                page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-                                page.wait_for_timeout(2000)
-                            except Exception:
-                                pass
+                        page_num += 1
 
                         if _check_captcha(page):
                             _handle_captcha(page)
-
-                        human_delay(delay_min, delay_max)
-
-                    if sent >= max_apps or processed >= max_apps or shutdown or limit_exceeded:
-                        break
-
-                    try:
-                        if not go_next_page(page):
-                            break
-                    except Exception:
-                        break
-
-                    page_num += 1
-
-                    if _check_captcha(page):
-                        _handle_captcha(page)
 
             finally:
                 try:
@@ -248,19 +366,70 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
     print_report(report, console)
 
     if exported > 0:
-        console.print(f"\n[dim]🧪 Тестовые вакансии ({exported} шт.) сохранены: {test_export_path}[/dim]")
+        console.print(f"\n[dim]Тестовые вакансии ({exported} шт.) сохранены: {test_export_path}[/dim]")
 
     if report_path:
         export_report(report, report_path)
         console.print(f"[dim]Отчёт сохранён: {report_path}[/dim]")
 
+    console.print("\n[dim]Совет: hh-apply stats — посмотреть общую статистику[/dim]")
 
-def _log_action(console: Console, status: str, vacancy) -> None:
-    """Выводит цветную строку лога для каждого действия."""
-    icon = LOG_ICONS.get(status, "")
-    color = STATUS_COLORS.get(status, "white")
-    label = STATUS_LABELS.get(status, status)
-    title = vacancy.title[:40] if hasattr(vacancy, 'title') else ""
-    company = vacancy.company[:25] if hasattr(vacancy, 'company') else ""
-    url = vacancy.url if hasattr(vacancy, 'url') else ""
-    console.print(f"  {icon} [{color}]{label}[/{color}] {url} ( {title} — {company} )")
+
+def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages):
+    """Dry-run: собирает вакансии и показывает таблицу."""
+    from InquirerPy import inquirer
+
+    all_vacancies = []
+    page_num = 0
+
+    console.print("[bold]Собираю вакансии...[/bold]")
+
+    while len(all_vacancies) < max_apps and page_num < max_pages:
+        dismiss_ads(page)
+        vacancies = collect_vacancy_ids_from_page(page)
+
+        if not vacancies:
+            if not go_next_page(page):
+                break
+            page_num += 1
+            continue
+
+        vacancies = sort_vacancies_fresh_first(vacancies)
+
+        for v in vacancies:
+            if len(all_vacancies) >= max_apps:
+                break
+            if tracker.is_applied(v.vacancy_id):
+                continue
+            skip = should_skip_vacancy(v, filters_config)
+            if skip:
+                continue
+            all_vacancies.append(v)
+
+        if not go_next_page(page):
+            break
+        page_num += 1
+
+    if not all_vacancies:
+        console.print("[yellow]Нет подходящих вакансий.[/yellow]")
+        return
+
+    # Rich таблица
+    table = Table(title=f"[bold]Найдено {len(all_vacancies)} вакансий (dry-run)[/bold]", border_style="blue")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Вакансия", style="bold", max_width=50)
+    table.add_column("Компания", max_width=25)
+    table.add_column("Зарплата", style="green", max_width=25)
+    table.add_column("Дата", style="dim", max_width=12)
+
+    for i, v in enumerate(all_vacancies, 1):
+        table.add_row(
+            str(i),
+            v.title[:50],
+            v.company[:25],
+            v.salary or "[dim]—[/dim]",
+            v.published_date or "[dim]—[/dim]",
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]Всего: {len(all_vacancies)} вакансий для отклика[/dim]")

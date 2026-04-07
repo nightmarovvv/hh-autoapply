@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -44,45 +45,62 @@ SCHEDULE = [
 ]
 
 
-HELP_TEXT = """
-[bold blue]hh-apply[/bold blue] — массовые автоотклики на hh.ru
+WELCOME_TEXT = f"""[bold blue]
+  _     _                           _
+ | |__ | |__         __ _ _ __  _ __| |_   _
+ | '_ \\| '_ \\ ___  / _` | '_ \\| '_ \\ | | | |
+ | | | | | | |___|  (_| | |_) | |_) | | |_| |
+ |_| |_|_| |_|      \\__,_| .__/| .__/|_|\\__, |
+                          |_|   |_|      |___/
+[/bold blue]
+  [dim]v{__version__} — автоматические отклики на hh.ru[/dim]
 
-[bold]Начало работы:[/bold]
-  hh-apply init        Настроить поиск и фильтры
-  hh-apply login       Войти в hh.ru (откроется браузер)
-  hh-apply run         Запустить отклики
+[bold]Быстрый старт:[/bold]
+  [green]1.[/green] hh-apply init        Настроить поиск и фильтры
+  [green]2.[/green] hh-apply login       Войти в hh.ru (откроется браузер)
+  [green]3.[/green] hh-apply run         Запустить отклики
 
-[bold]Дополнительно:[/bold]
-  hh-apply boost       Поднять резюме в поиске
-  hh-apply whoami      Проверить аккаунт
-  hh-apply stats       Статистика откликов
-  hh-apply done        Убрать решённую тестовую вакансию
-  hh-apply query       SQL-запросы к базе
+[bold]Утилиты:[/bold]
+  hh-apply stats         Статистика откликов
+  hh-apply responses     Мониторинг ответов рекрутеров
+  hh-apply boost         Поднять резюме в поиске
+  hh-apply schedule      Настроить автозапуск
+  hh-apply done          Убрать тестовую вакансию
+  hh-apply query         SQL-запросы к базе
+  hh-apply completions   Автодополнение для shell
 
-[bold]Опции run:[/bold]
-  --limit 50           Максимум откликов
-  --dry-run            Только посмотреть, не откликаться
-  --exclude "regex"    Исключить вакансии по regex
-  --headless           Без окна браузера
-"""
+[dim]Подробнее: hh-apply <команда> --help[/dim]"""
 
 
-@click.group(invoke_without_command=True)
+class RichHelpGroup(click.Group):
+    """Click Group с Rich-форматированием help."""
+
+    def format_help(self, ctx, formatter):
+        Console().print(WELCOME_TEXT)
+
+
+@click.group(cls=RichHelpGroup, invoke_without_command=True)
 @click.version_option(__version__, prog_name="hh-apply")
 @click.pass_context
 def main(ctx):
     """hh-apply — массовые автоматические отклики на вакансии hh.ru"""
     if ctx.invoked_subcommand is None:
-        Console().print(HELP_TEXT)
+        Console().print(WELCOME_TEXT)
 
 
 # ==================== INIT ====================
 
-@main.command()
-def init():
+@main.command(epilog="""
+Примеры:
+  hh-apply init                  Интерактивный визард
+  hh-apply init -o python.yaml   Сохранить как python.yaml
+  hh-apply init -o qa.yaml       Отдельный профиль для QA
+""")
+@click.option("--output", "-o", default="config.yaml", help="Имя файла конфига")
+def init(output):
     """Настроить hh-apply через интерактивный визард."""
     console = Console()
-    target = Path.cwd() / "config.yaml"
+    target = Path.cwd() / output
 
     existing_config = None
     edit_mode = False
@@ -91,7 +109,7 @@ def init():
         with open(target, "r", encoding="utf-8") as f:
             existing_config = yaml.safe_load(f) or {}
 
-        console.print("[yellow]config.yaml уже существует.[/yellow]")
+        console.print(f"[yellow]{output} уже существует.[/yellow]")
         console.print("[dim]Логин и куки в безопасности — хранятся отдельно в ~/.hh-apply/[/dim]\n")
 
         action = inquirer.select(
@@ -204,8 +222,14 @@ def init():
 
     default_pattern = _get("filters", "exclude_pattern", "")
     exclude_pattern = inquirer.text(
-        message="Regex исключение (напр. junior|стажёр|bitrix):",
+        message="Regex исключение по названию (напр. junior|стажёр|bitrix):",
         default=str(default_pattern) if default_pattern else "",
+    ).execute()
+
+    default_company_pattern = _get("filters", "exclude_company_pattern", "")
+    exclude_company_pattern = inquirer.text(
+        message="Regex исключение по компании (напр. аутсорс|крипто):",
+        default=str(default_company_pattern) if default_company_pattern else "",
     ).execute()
 
     # === 3. Отклик ===
@@ -229,12 +253,13 @@ def init():
     cover_letter = ""
     if use_cover_letter:
         default_letter = str(_get("apply", "cover_letter", "")).strip()
+        console.print("[dim]  Переменные: {company}, {position}, {salary}[/dim]")
         cover_letter = inquirer.text(
             message="Текст письма (Enter = шаблон по умолчанию):",
             default=default_letter if default_letter else "",
         ).execute()
         if not cover_letter.strip():
-            cover_letter = "Здравствуйте!\n\nМеня заинтересовала ваша вакансия. Буду рад обсудить детали.\n\nС уважением"
+            cover_letter = "Здравствуйте!\n\nМеня заинтересовала вакансия {position} в {company}. Буду рад обсудить детали.\n\nС уважением"
 
     # === Собираем конфиг ===
     config = {
@@ -243,6 +268,7 @@ def init():
             "exclude_companies": exclude_companies,
             "exclude_keywords": exclude_keywords,
             "exclude_pattern": exclude_pattern.strip() if exclude_pattern else "",
+            "exclude_company_pattern": exclude_company_pattern.strip() if exclude_company_pattern else "",
             "skip_foreign": False,
             "skip_test_vacancies": True,
         },
@@ -275,17 +301,45 @@ def init():
     console.print()
     console.print(Panel(
         f"[green]Конфиг сохранён:[/green] {target}\n\n"
-        f"Следующий шаг:\n"
+        f"[bold]Следующий шаг:[/bold]\n"
         f"  [bold]hh-apply login[/bold]  — войти в hh.ru\n"
-        f"  [bold]hh-apply run[/bold]    — запустить отклики",
+        f"  [bold]hh-apply run --dry-run[/bold] — пробный запуск",
         title="Готово",
         border_style="green",
     ))
 
+    # Валидация: проверяем сколько вакансий
+    _validate_config_search(config, console)
+
+
+def _validate_config_search(config: dict, console: Console) -> None:
+    """Проверяет количество вакансий по фильтрам (без браузера, через requests)."""
+    try:
+        from hh_apply.filters import build_search_url
+        import requests
+
+        search_url = build_search_url(config.get("search", {}))
+        api_url = search_url.replace("https://hh.ru/search/vacancy", "https://api.hh.ru/vacancies")
+        resp = requests.get(api_url, headers={"User-Agent": "hh-apply/1.0"}, timeout=10)
+        if resp.ok:
+            data = resp.json()
+            found = data.get("found", 0)
+            if found == 0:
+                console.print("\n[yellow]Внимание: по вашим фильтрам не найдено вакансий.[/yellow]")
+                console.print("[dim]Попробуйте расширить запрос или убрать фильтры.[/dim]")
+            else:
+                console.print(f"\n[dim]По вашим фильтрам найдено вакансий: {found}[/dim]")
+    except Exception:
+        pass
+
 
 # ==================== LOGIN ====================
 
-@main.command()
+@main.command(epilog="""
+Примеры:
+  hh-apply login                 Войти с config.yaml
+  hh-apply login -c qa.yaml     Войти с другим конфигом
+""")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def login(config):
     """Войти в hh.ru и сохранить сессию."""
@@ -347,7 +401,9 @@ def login(config):
         if check_logged_in(page):
             context.storage_state(path=str(storage_path))
             console.print(f"\n[green]Сессия сохранена![/green]")
-            console.print("Запускайте: [bold]hh-apply run[/bold]")
+            console.print("\n[bold]Следующий шаг:[/bold]")
+            console.print("  [bold]hh-apply run --dry-run[/bold] — пробный запуск")
+            console.print("  [bold]hh-apply run[/bold]           — боевые отклики")
         else:
             console.print("\n[red]Логин не подтверждён.[/red]")
 
@@ -359,7 +415,15 @@ def login(config):
 
 # ==================== RUN ====================
 
-@main.command()
+@main.command(epilog="""
+Примеры:
+  hh-apply run                        Интерактивный режим
+  hh-apply run --limit 10             Максимум 10 откликов
+  hh-apply run --dry-run              Только посмотреть вакансии
+  hh-apply run -c qa.yaml --headless  С другим профилем, без окна
+  hh-apply run -e "junior|стажёр"     Исключить по regex
+  hh-apply run -r report.txt          Сохранить отчёт в файл
+""")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 @click.option("--limit", "-l", type=int, help="Макс. количество откликов")
 @click.option("--headless", is_flag=True, help="Скрытый режим браузера")
@@ -367,15 +431,7 @@ def login(config):
 @click.option("--report", "-r", type=str, help="Сохранить отчёт в файл")
 @click.option("--exclude", "-e", type=str, help="Regex исключение (напр. junior|стажёр)")
 def run(config, limit, headless, dry_run, report, exclude):
-    """Запустить автоотклики.
-
-    \b
-    Примеры:
-      hh-apply run                        # Интерактивный режим
-      hh-apply run --limit 10             # Максимум 10 откликов
-      hh-apply run --dry-run              # Только посмотреть вакансии
-      hh-apply run -e "junior|стажёр"     # Исключить по regex
-    """
+    """Запустить автоотклики."""
     from hh_apply.config import load_config
     from hh_apply.runner import run as do_run
 
@@ -423,12 +479,22 @@ def run(config, limit, headless, dry_run, report, exclude):
 
 # ==================== STATS ====================
 
-@main.command()
+@main.command(epilog="""
+Примеры:
+  hh-apply stats                 Показать статистику
+  hh-apply stats --csv -o out.csv  Экспорт в CSV
+  hh-apply stats --json          Экспорт в JSON (stdout)
+  hh-apply stats -c qa.yaml     Статистика по другому профилю
+""")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
-def stats(config):
+@click.option("--csv", "csv_export", is_flag=True, help="Экспорт в CSV")
+@click.option("--json", "json_export", is_flag=True, help="Экспорт в JSON")
+@click.option("-o", "--output", type=str, help="Файл для экспорта")
+def stats(config, csv_export, json_export, output):
     """Показать статистику откликов."""
     from hh_apply.config import load_config, get_db_path
     from hh_apply.tracker import Tracker
+    import json as json_module
 
     console = Console()
     cfg = load_config(config)
@@ -439,44 +505,89 @@ def stats(config):
         return
 
     with Tracker(db_path) as tracker:
+        # CSV экспорт
+        if csv_export:
+            out = output or "applications.csv"
+            count = tracker.export_csv(out)
+            console.print(f"[green]Экспорт в CSV: {out} ({count} строк)[/green]")
+            return
+
+        # JSON экспорт
+        if json_export:
+            apps = tracker.get_all_applications()
+            if output:
+                tracker.export_json(output)
+                console.print(f"[green]Экспорт в JSON: {output} ({len(apps)} строк)[/green]")
+            else:
+                print(json_module.dumps(apps, ensure_ascii=False, indent=2))
+            return
+
         st = tracker.stats()
         total = tracker.total()
 
+        # Основная таблица с цветами
         table = Table(title="Статистика откликов hh-apply", border_style="blue")
         table.add_column("Статус", style="bold")
         table.add_column("Кол-во", justify="right")
+        table.add_column("", width=20)  # ASCII bar
 
         names = {
-            "sent": "[green]Отправлен[/green]",
-            "cover_letter_sent": "[green]С письмом[/green]",
-            "letter_sent": "[green]С письмом[/green]",
-            "test_required": "[yellow]Тестовое[/yellow]",
-            "extra_steps": "[yellow]Доп. вопросы[/yellow]",
-            "already_applied": "[dim]Уже откликались[/dim]",
-            "error": "[red]Ошибка[/red]",
-            "filtered": "[dim]Отфильтровано[/dim]",
-            "captcha": "[yellow]Капча[/yellow]",
+            "sent": ("[green]Отправлен[/green]", "green"),
+            "cover_letter_sent": ("[green]С письмом[/green]", "green"),
+            "letter_sent": ("[green]С письмом[/green]", "green"),
+            "test_required": ("[yellow]Тестовое[/yellow]", "yellow"),
+            "extra_steps": ("[yellow]Доп. вопросы[/yellow]", "yellow"),
+            "already_applied": ("[dim]Уже откликались[/dim]", "dim"),
+            "error": ("[red]Ошибка[/red]", "red"),
+            "filtered": ("[dim]Отфильтровано[/dim]", "dim"),
+            "captcha": ("[yellow]Капча[/yellow]", "yellow"),
         }
+
         for status, count in sorted(st.items(), key=lambda x: x[1], reverse=True):
-            table.add_row(names.get(status, status), str(count))
+            name_info = names.get(status, (status, "white"))
+            bar_len = int(count / max(total, 1) * 20) if total > 0 else 0
+            color = name_info[1]
+            bar = f"[{color}]{'█' * bar_len}[/{color}]{'░' * (20 - bar_len)}"
+            table.add_row(name_info[0], str(count), bar)
+
         table.add_section()
-        table.add_row("[bold]Всего[/bold]", f"[bold]{total}[/bold]")
+        table.add_row("[bold]Всего[/bold]", f"[bold]{total}[/bold]", "")
         console.print(table)
+
+        # По дням
+        daily = tracker.stats_by_day(7)
+        if daily:
+            console.print()
+            day_table = Table(title="Последние 7 дней", border_style="dim")
+            day_table.add_column("Дата", style="dim")
+            day_table.add_column("Отправлено", style="green", justify="right")
+            day_table.add_column("Тесты", style="yellow", justify="right")
+            day_table.add_column("Ошибки", style="red", justify="right")
+            day_table.add_column("Всего", style="bold", justify="right")
+
+            for d in daily:
+                day_table.add_row(
+                    d["date"],
+                    str(d["sent"]),
+                    str(d["test"]),
+                    str(d["error"]),
+                    str(d["total"]),
+                )
+            console.print(day_table)
 
 
 # ==================== DONE ====================
 
-@main.command()
+@main.command(epilog="""
+Примеры:
+  hh-apply done              Интерактивный выбор
+  hh-apply done 12345678     По ID
+  hh-apply done all          Очистить все
+""")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 @click.argument("vacancy_id", required=False)
 def done(config, vacancy_id):
-    """Убрать тестовую вакансию из списка.
-
-    \b
-      hh-apply done              # Интерактивный выбор
-      hh-apply done 12345678     # По ID
-      hh-apply done all          # Очистить все
-    """
+    """Убрать тестовую вакансию из списка."""
     from hh_apply.config import load_config, get_db_path, get_data_dir
     from hh_apply.tracker import Tracker
 
@@ -540,7 +651,11 @@ def done(config, vacancy_id):
 
 # ==================== API-LOGIN ====================
 
-@main.command(name="api-login")
+@main.command(name="api-login", epilog="""
+Примеры:
+  hh-apply api-login            OAuth через браузер
+  hh-apply api-login -c qa.yaml С другим профилем
+""")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def api_login(config):
     """OAuth авторизация для API-команд (whoami, boost)."""
@@ -606,7 +721,11 @@ def api_login(config):
 
 # ==================== WHOAMI ====================
 
-@main.command()
+@main.command(epilog="""
+Примеры:
+  hh-apply whoami               Информация об аккаунте
+  hh-apply whoami -c qa.yaml    С другим профилем
+""")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def whoami(config):
     """Проверить аккаунт: ID, имя, резюме, просмотры.
@@ -643,7 +762,11 @@ def whoami(config):
 
 # ==================== BOOST ====================
 
-@main.command()
+@main.command(epilog="""
+Примеры:
+  hh-apply boost                Поднять все резюме
+  hh-apply boost -c qa.yaml    С другим профилем
+""")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def boost(config):
     """Поднять все резюме в поиске.
@@ -685,22 +808,254 @@ def boost(config):
             console.print(f"[red]Ошибка: {e}[/red]")
 
 
+# ==================== RESPONSES ====================
+
+@main.command(epilog="""
+Примеры:
+  hh-apply responses             Посмотреть ответы рекрутеров
+  hh-apply responses -c qa.yaml  С другим профилем
+""")
+@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
+def responses(config):
+    """Мониторинг ответов рекрутеров (просмотры, приглашения, отказы)."""
+    from hh_apply.config import load_config, get_data_dir
+    from hh_apply.api_client import HHApiClient
+
+    console = Console()
+    cfg = load_config(config)
+    client = HHApiClient(get_data_dir(cfg) / "api_token.json")
+
+    if not client.is_authenticated:
+        console.print("[red]Запустите: hh-apply api-login[/red]")
+        return
+
+    try:
+        _show_responses(client, console)
+    except Exception as e:
+        console.print(f"[red]Ошибка: {e}[/red]")
+        console.print("[dim]Попробуйте: hh-apply api-login[/dim]")
+
+
+def _show_responses(client, console: Console) -> None:
+    """Загружает и показывает ответы рекрутеров через API."""
+    # Получаем список negotiations по статусам
+    statuses = {
+        "Приглашения": "invitation",
+        "Отказы": "discard",
+        "Ответы": "response",
+    }
+
+    total_apps = 0
+    total_invitations = 0
+    total_discards = 0
+
+    results = {}
+
+    for label, status in statuses.items():
+        try:
+            resp = client.get(f"/negotiations?status={status}&per_page=0")
+            count = resp.get("found", 0)
+            results[label] = count
+            if status == "invitation":
+                total_invitations = count
+            elif status == "discard":
+                total_discards = count
+        except Exception:
+            results[label] = "?"
+
+    # Общее количество откликов
+    try:
+        resp = client.get("/negotiations?per_page=0")
+        total_apps = resp.get("found", 0)
+    except Exception:
+        total_apps = 0
+
+    # Красивая таблица
+    table = Table(title="Ответы рекрутеров", border_style="blue")
+    table.add_column("Метрика", style="bold")
+    table.add_column("Кол-во", justify="right")
+
+    table.add_row("[bold]Всего откликов[/bold]", str(total_apps))
+    table.add_row("[green]Приглашения[/green]", str(results.get("Приглашения", "?")))
+    table.add_row("[red]Отказы[/red]", str(results.get("Отказы", "?")))
+    table.add_row("[yellow]Ответы[/yellow]", str(results.get("Ответы", "?")))
+
+    console.print(table)
+
+    # Конверсия
+    if total_apps > 0 and isinstance(total_invitations, int):
+        rate = total_invitations / total_apps * 100
+        console.print(f"\n[dim]Конверсия: {rate:.1f}% приглашений из {total_apps} откликов[/dim]")
+
+
+# ==================== SCHEDULE ====================
+
+@main.command(epilog="""
+Примеры:
+  hh-apply schedule set 09:00            Запуск каждый день в 9:00
+  hh-apply schedule set 09:00 --weekdays Только будни
+  hh-apply schedule boost 4              Boost резюме каждые 4 часа
+  hh-apply schedule status               Показать текущее расписание
+  hh-apply schedule remove               Удалить расписание
+""")
+@click.argument("action", type=click.Choice(["set", "boost", "status", "remove"]))
+@click.argument("value", required=False)
+@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
+@click.option("--weekdays", is_flag=True, help="Только будни (пн-пт)")
+def schedule(action, value, config, weekdays):
+    """Настроить автозапуск по расписанию (через crontab)."""
+    console = Console()
+
+    if action == "status":
+        _schedule_status(console)
+        return
+
+    if action == "remove":
+        _schedule_remove(console)
+        return
+
+    if action == "set":
+        if not value:
+            console.print("[red]Укажите время: hh-apply schedule set 09:00[/red]")
+            return
+        _schedule_set(value, config, weekdays, console)
+        return
+
+    if action == "boost":
+        hours = int(value) if value and value.isdigit() else 4
+        _schedule_boost(hours, config, console)
+        return
+
+
+def _schedule_set(time_str: str, config_path: str, weekdays: bool, console: Console) -> None:
+    """Добавляет cron-задачу для hh-apply run."""
+    import subprocess
+
+    parts = time_str.split(":")
+    if len(parts) != 2:
+        console.print("[red]Формат: HH:MM (напр. 09:00)[/red]")
+        return
+
+    hour, minute = parts[0], parts[1]
+    dow = "1-5" if weekdays else "*"
+    config_abs = str(Path(config_path).resolve())
+    cmd = f"cd {Path.cwd()} && hh-apply run --headless -c {config_abs}"
+    cron_line = f"{minute} {hour} * * {dow} {cmd}"
+
+    # Добавляем в crontab
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        existing = result.stdout if result.returncode == 0 else ""
+        # Удаляем старые записи hh-apply run
+        lines = [l for l in existing.splitlines() if "hh-apply run" not in l]
+        lines.append(cron_line)
+        new_crontab = "\n".join(lines) + "\n"
+        subprocess.run(["crontab", "-"], input=new_crontab, text=True, check=True)
+        console.print(f"[green]Расписание установлено: {time_str} {'(будни)' if weekdays else '(ежедневно)'}[/green]")
+        console.print(f"[dim]{cron_line}[/dim]")
+    except FileNotFoundError:
+        console.print("[yellow]crontab недоступен. На Windows используйте Планировщик задач.[/yellow]")
+        console.print(f"[dim]Команда: {cmd}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Ошибка: {e}[/red]")
+
+
+def _schedule_boost(hours: int, config_path: str, console: Console) -> None:
+    """Добавляет cron-задачу для hh-apply boost."""
+    import subprocess
+
+    config_abs = str(Path(config_path).resolve())
+    cmd = f"cd {Path.cwd()} && hh-apply boost -c {config_abs}"
+    cron_line = f"0 */{hours} * * * {cmd}"
+
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        existing = result.stdout if result.returncode == 0 else ""
+        lines = [l for l in existing.splitlines() if "hh-apply boost" not in l]
+        lines.append(cron_line)
+        new_crontab = "\n".join(lines) + "\n"
+        subprocess.run(["crontab", "-"], input=new_crontab, text=True, check=True)
+        console.print(f"[green]Auto-boost установлен: каждые {hours} часа[/green]")
+        console.print(f"[dim]{cron_line}[/dim]")
+    except FileNotFoundError:
+        console.print("[yellow]crontab недоступен.[/yellow]")
+        console.print(f"[dim]Команда: {cmd}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Ошибка: {e}[/red]")
+
+
+def _schedule_status(console: Console) -> None:
+    """Показывает текущие cron-задачи hh-apply."""
+    import subprocess
+
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if result.returncode != 0:
+            console.print("[dim]Нет crontab записей.[/dim]")
+            return
+
+        lines = [l for l in result.stdout.splitlines() if "hh-apply" in l]
+        if not lines:
+            console.print("[dim]Нет запланированных задач hh-apply.[/dim]")
+            return
+
+        table = Table(title="Расписание hh-apply", border_style="blue")
+        table.add_column("Задача", style="bold")
+        table.add_column("Cron")
+
+        for line in lines:
+            if "hh-apply run" in line:
+                table.add_row("[green]Автоотклики[/green]", line.strip())
+            elif "hh-apply boost" in line:
+                table.add_row("[yellow]Auto-boost[/yellow]", line.strip())
+            else:
+                table.add_row("Другое", line.strip())
+
+        console.print(table)
+    except FileNotFoundError:
+        console.print("[yellow]crontab недоступен.[/yellow]")
+
+
+def _schedule_remove(console: Console) -> None:
+    """Удаляет все cron-задачи hh-apply."""
+    import subprocess
+
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if result.returncode != 0:
+            console.print("[dim]Нет crontab записей.[/dim]")
+            return
+
+        lines = [l for l in result.stdout.splitlines() if "hh-apply" not in l]
+        new_crontab = "\n".join(lines) + "\n" if lines else ""
+
+        if new_crontab.strip():
+            subprocess.run(["crontab", "-"], input=new_crontab, text=True, check=True)
+        else:
+            subprocess.run(["crontab", "-r"], check=True)
+
+        console.print("[green]Расписание hh-apply удалено.[/green]")
+    except FileNotFoundError:
+        console.print("[yellow]crontab недоступен.[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Ошибка: {e}[/red]")
+
+
 # ==================== QUERY ====================
 
-@main.command()
+@main.command(epilog="""
+Примеры:
+  hh-apply query "SELECT * FROM applications"
+  hh-apply query "SELECT * FROM skipped_vacancies"
+  hh-apply query "SELECT * FROM applications" --csv -o out.csv
+  hh-apply query "SELECT company, COUNT(*) c FROM applications GROUP BY company ORDER BY c DESC"
+""")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 @click.option("--csv", "csv_export", is_flag=True, help="Экспорт в CSV")
 @click.option("-o", "--output", type=str, help="Файл для экспорта")
 @click.argument("sql", required=False)
 def query(config, csv_export, output, sql):
-    """SQL-запросы к базе данных.
-
-    \b
-    Примеры:
-      hh-apply query "SELECT * FROM applications"
-      hh-apply query "SELECT * FROM skipped_vacancies"
-      hh-apply query "SELECT * FROM applications" --csv -o out.csv
-    """
+    """SQL-запросы к базе данных."""
     import csv as csv_module
     import io
     from hh_apply.config import load_config, get_db_path
@@ -748,3 +1103,54 @@ def query(config, csv_export, output, sql):
             table.add_row(*[str(v) for v in row])
         console.print(table)
         console.print(f"[dim]{len(rows)} строк[/dim]")
+
+
+# ==================== COMPLETIONS ====================
+
+@main.command(epilog="""
+Примеры:
+  hh-apply completions bash      Скрипт для bash
+  hh-apply completions zsh       Скрипт для zsh
+  hh-apply completions fish      Скрипт для fish
+
+Установка:
+  # Bash
+  hh-apply completions bash >> ~/.bashrc
+
+  # Zsh
+  hh-apply completions zsh >> ~/.zshrc
+
+  # Fish
+  hh-apply completions fish > ~/.config/fish/completions/hh-apply.fish
+""")
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
+def completions(shell):
+    """Сгенерировать скрипт автодополнения для shell."""
+    import subprocess
+
+    env = os.environ.copy()
+
+    if shell == "bash":
+        env["_HH_APPLY_COMPLETE"] = "bash_source"
+    elif shell == "zsh":
+        env["_HH_APPLY_COMPLETE"] = "zsh_source"
+    elif shell == "fish":
+        env["_HH_APPLY_COMPLETE"] = "fish_source"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "hh_apply.cli"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.stdout:
+        print(result.stdout)
+    else:
+        # Fallback: генерируем через Click напрямую
+        env_var = f"_HH_APPLY_COMPLETE={shell}_source"
+        Console().print(f"[dim]Выполните: {env_var} hh-apply[/dim]")
+
+
+if __name__ == "__main__":
+    main()
