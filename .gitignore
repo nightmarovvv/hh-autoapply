@@ -1,6 +1,19 @@
 data/
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
 .mcp.json
+.claude/
+
+# Debug scripts
 debug_*.py
 investigate.py
+intercept*.py
+
+# User data
+config.yaml
+*.db
