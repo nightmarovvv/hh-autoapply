@@ -194,8 +194,10 @@ cd %USERPROFILE%\hh-apply && .venv\Scripts\activate
 Активируйте окружение (см. выше), затем:
 
 ```bash
-pip install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
+pip install --no-cache-dir --force-reinstall git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
+
+> `--no-cache-dir` скачивает заново, `--force-reinstall` перезаписывает старую версию. Обычный `--upgrade` иногда не срабатывает.
 
 ## Быстрый старт
 
