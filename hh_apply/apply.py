@@ -93,6 +93,19 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
         """)
 
         if box and box.get("w", 0) > 0:
+            # Убираем href чтобы клик не переходил на страницу вакансии
+            page.evaluate(f"""
+                () => {{
+                    const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
+                    for (const card of cards) {{
+                        const link = card.querySelector('[data-qa="serp-item__title"]');
+                        if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
+                        const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                        if (btn && btn.tagName === 'A') btn.removeAttribute('href');
+                        return;
+                    }}
+                }}
+            """)
             cx = box["x"] + box["w"] / 2 + random.uniform(-10, 10)
             cy = box["y"] + box["h"] / 2 + random.uniform(-3, 3)
             human_mouse_move(page, cx, cy)
@@ -249,6 +262,25 @@ def _handle_redirect(page: Page, vacancy: Vacancy, original_url: str) -> str:
             page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
             page.wait_for_timeout(2000)
             return STATUS_SENT
+
+    # Перешли на страницу вакансии — кнопка была ссылкой <a href>
+    # Пробуем откликнуться со страницы вакансии
+    if "/vacancy/" in current:
+        # Ищем кнопку "Откликнуться" на странице вакансии
+        vacancy_apply_btn = page.locator('[data-qa="vacancy-response-link-top"]')
+        if vacancy_apply_btn.count() == 0:
+            vacancy_apply_btn = page.locator('a:has-text("Откликнуться"), button:has-text("Откликнуться")')
+        if vacancy_apply_btn.count() > 0:
+            vacancy_apply_btn.first.click()
+            page.wait_for_timeout(3000)
+            if _check_sent(page):
+                page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
+                page.wait_for_timeout(2000)
+                return STATUS_SENT
+        # Не получилось — возвращаемся
+        page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
+        page.wait_for_timeout(2000)
+        return STATUS_ERROR
 
     page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
     page.wait_for_timeout(2000)
