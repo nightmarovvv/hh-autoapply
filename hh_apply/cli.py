@@ -1,4 +1,4 @@
-"""CLI-интерфейс hh-apply."""
+"""CLI-интерфейс hh-apply с InquirerPy для интерактивных меню."""
 
 from __future__ import annotations
 
@@ -7,48 +7,41 @@ from pathlib import Path
 
 import click
 import yaml
+from InquirerPy import inquirer
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.table import Table
 
 from hh_apply import __version__
 
-# Справочники для визарда
-AREAS = {
-    "Москва": 1,
-    "Санкт-Петербург": 2,
-    "Россия (вся)": 113,
-    "Новосибирск": 4,
-    "Екатеринбург": 3,
-    "Казань": 88,
-    "Краснодар": 53,
-    "Нижний Новгород": 66,
-    "Удалённо (без региона)": None,
-}
+# Справочники
+AREAS = [
+    ("Москва", 1),
+    ("Санкт-Петербург", 2),
+    ("Россия (вся)", 113),
+    ("Новосибирск", 4),
+    ("Екатеринбург", 3),
+    ("Казань", 88),
+    ("Краснодар", 53),
+    ("Нижний Новгород", 66),
+    ("Удалённо (без региона)", None),
+]
 
-EXPERIENCE_OPTIONS = {
-    "Без опыта": "noExperience",
-    "1-3 года": "between1And3",
-    "3-6 лет": "between3And6",
-    "Более 6 лет": "moreThan6",
-    "Любой": None,
-}
+EXPERIENCE = [
+    ("Без опыта", "noExperience"),
+    ("1-3 года", "between1And3"),
+    ("3-6 лет", "between3And6"),
+    ("Более 6 лет", "moreThan6"),
+    ("Любой", None),
+]
 
-SCHEDULE_OPTIONS = {
-    "Удалённая работа": "remote",
-    "Полный день": "fullDay",
-    "Сменный график": "shift",
-    "Гибкий график": "flexible",
-    "Вахта": "flyInFlyOut",
-}
-
-EMPLOYMENT_OPTIONS = {
-    "Полная занятость": "full",
-    "Частичная": "part",
-    "Проектная работа": "project",
-    "Стажировка": "probation",
-}
+SCHEDULE = [
+    ("Удалённая работа", "remote"),
+    ("Полный день", "fullDay"),
+    ("Сменный график", "shift"),
+    ("Гибкий график", "flexible"),
+    ("Вахта", "flyInFlyOut"),
+]
 
 
 HELP_TEXT = """
@@ -80,9 +73,10 @@ HELP_TEXT = """
 def main(ctx):
     """hh-apply — массовые автоматические отклики на вакансии hh.ru"""
     if ctx.invoked_subcommand is None:
-        console = Console()
-        console.print(HELP_TEXT)
+        Console().print(HELP_TEXT)
 
+
+# ==================== INIT ====================
 
 @main.command()
 def init():
@@ -94,26 +88,23 @@ def init():
     edit_mode = False
 
     if target.exists():
-        # Загружаем текущий конфиг для дефолтов
         with open(target, "r", encoding="utf-8") as f:
             existing_config = yaml.safe_load(f) or {}
 
         console.print("[yellow]config.yaml уже существует.[/yellow]")
-        console.print("[dim]Ваш логин и куки в безопасности — они хранятся отдельно в ~/.hh-apply/[/dim]\n")
+        console.print("[dim]Логин и куки в безопасности — хранятся отдельно в ~/.hh-apply/[/dim]\n")
 
-        choice = Prompt.ask(
-            "  Что сделать?",
-            choices=["edit", "new", "cancel"],
-            default="edit",
-            console=console,
-        )
-        if choice == "cancel":
+        action = inquirer.select(
+            message="Что сделать?",
+            choices=["Редактировать текущий", "Создать новый", "Отмена"],
+            default="Редактировать текущий",
+        ).execute()
+
+        if action == "Отмена":
             return
-        if choice == "edit":
+        if action == "Редактировать текущий":
             edit_mode = True
-        # choice == "new" → полная перезапись
 
-    # Дефолты из существующего конфига
     _MISSING = object()
 
     def _get(section, key, fallback=""):
@@ -124,127 +115,125 @@ def init():
         return fallback
 
     console.print()
-    console.print(Panel("[bold blue]hh-apply[/bold blue] — настройка автооткликов", border_style="blue"))
-    if edit_mode:
-        console.print("[dim]Нажмите Enter чтобы оставить текущее значение[/dim]")
+    console.print(Panel("[bold blue]hh-apply[/bold blue] — настройка", border_style="blue"))
     console.print()
 
-    # === Поиск ===
-    console.print("[bold]1. Поиск[/bold]")
+    # === 1. Поиск ===
+    console.print("[bold]1. Поиск[/bold]\n")
+
     default_query = _get("search", "query", "python developer")
-    query = Prompt.ask("  Поисковый запрос", default=str(default_query), console=console)
+    query = inquirer.text(
+        message="Поисковый запрос:",
+        default=str(default_query),
+    ).execute()
 
-    # Регион
-    console.print()
-    console.print("  [dim]Регион:[/dim]")
-    area_names = list(AREAS.keys())
-    for i, name in enumerate(area_names, 1):
-        console.print(f"    {i}. {name}")
-    # Находим текущий регион если есть
+    # Регион — стрелочное меню
     current_area = _get("search", "area", None)
-    default_area_idx = 1
+    default_area = "Удалённо (без региона)"
     if edit_mode:
-        # current_area=None означает "Удалённо (без региона)" — это последний пункт
-        if current_area is None:
-            default_area_idx = len(area_names)  # Последний = "Удалённо"
-        else:
-            for i, (name, aid) in enumerate(AREAS.items(), 1):
-                if aid == current_area:
-                    default_area_idx = i
-                    break
-    area_idx = IntPrompt.ask("  Номер региона", default=default_area_idx, console=console)
-    area_idx = max(1, min(area_idx, len(area_names)))
-    area_name = area_names[area_idx - 1]
-    area_id = AREAS[area_name]
-    console.print(f"  [green]Регион: {area_name}[/green]")
+        for name, aid in AREAS:
+            if aid == current_area:
+                default_area = name
+                break
+    area_name = inquirer.select(
+        message="Регион:",
+        choices=[name for name, _ in AREAS],
+        default=default_area,
+    ).execute()
+    area_id = dict(AREAS)[area_name]
 
     # Зарплата
-    console.print()
     default_salary = _get("search", "salary_from", "")
-    salary_str = Prompt.ask("  Минимальная зарплата (или Enter — без фильтра)", default=str(default_salary) if default_salary else "", console=console)
+    salary_str = inquirer.text(
+        message="Минимальная зарплата (пусто = без фильтра):",
+        default=str(default_salary) if default_salary else "",
+    ).execute()
     salary_from = int(salary_str) if salary_str.strip().isdigit() else None
     salary_only = False
     if salary_from:
-        salary_only = Confirm.ask("  Только вакансии с указанной зарплатой?", default=True, console=console)
+        salary_only = inquirer.confirm(
+            message="Только вакансии с указанной зарплатой?",
+            default=True,
+        ).execute()
 
-    # Опыт
-    console.print()
-    console.print("  [dim]Опыт:[/dim]")
-    exp_names = list(EXPERIENCE_OPTIONS.keys())
-    for i, name in enumerate(exp_names, 1):
-        console.print(f"    {i}. {name}")
-    # Находим текущий опыт
+    # Опыт — стрелочное меню
     current_exp = _get("search", "experience", None)
-    default_exp_idx = 5
-    if current_exp:
-        for i, (name, val) in enumerate(EXPERIENCE_OPTIONS.items(), 1):
+    default_exp = "Любой"
+    if edit_mode:
+        for name, val in EXPERIENCE:
             if val == current_exp:
-                default_exp_idx = i
+                default_exp = name
                 break
-    exp_idx = IntPrompt.ask("  Номер", default=default_exp_idx, console=console)
-    exp_idx = max(1, min(exp_idx, len(exp_names)))
-    experience = EXPERIENCE_OPTIONS[exp_names[exp_idx - 1]]
-    console.print(f"  [green]Опыт: {exp_names[exp_idx - 1]}[/green]")
+    exp_name = inquirer.select(
+        message="Опыт работы:",
+        choices=[name for name, _ in EXPERIENCE],
+        default=default_exp,
+    ).execute()
+    experience = dict(EXPERIENCE)[exp_name]
 
-    # График
-    console.print()
-    console.print("  [dim]График (можно несколько через запятую):[/dim]")
-    sched_names = list(SCHEDULE_OPTIONS.keys())
-    for i, name in enumerate(sched_names, 1):
-        console.print(f"    {i}. {name}")
-    # Текущие номера графика
-    current_scheds = _get("search", "schedule", [])
-    default_sched = ""
-    if current_scheds:
-        nums = []
-        for s in current_scheds:
-            for i, (name, val) in enumerate(SCHEDULE_OPTIONS.items(), 1):
-                if val == s:
-                    nums.append(str(i))
-        default_sched = ",".join(nums)
-    sched_input = Prompt.ask("  Номера через запятую (или Enter — любой)", default=default_sched, console=console)
-    schedule = []
-    if sched_input.strip():
-        for s in sched_input.split(","):
-            s = s.strip()
-            if s.isdigit():
-                idx = int(s)
-                if 1 <= idx <= len(sched_names):
-                    schedule.append(SCHEDULE_OPTIONS[sched_names[idx - 1]])
+    # График — checkbox (пробелом отмечаешь несколько)
+    current_scheds = _get("search", "schedule", []) or []
+    default_checked = []
+    for name, val in SCHEDULE:
+        if val in current_scheds:
+            default_checked.append(name)
 
-    # === Фильтры ===
-    console.print()
-    console.print("[bold]2. Фильтры[/bold]")
-    default_kw = ", ".join(_get("filters", "exclude_keywords", []))
-    exclude_kw = Prompt.ask(
-        "  Исключить слова из названий (через запятую, или Enter — не исключать)",
-        default=default_kw, console=console,
-    )
-    exclude_keywords = [w.strip() for w in exclude_kw.split(",") if w.strip()] if exclude_kw.strip() else []
+    sched_names = inquirer.checkbox(
+        message="График (пробел — выбрать, Enter — подтвердить):",
+        choices=[name for name, _ in SCHEDULE],
+        default=default_checked if default_checked else None,
+    ).execute()
+    schedule = [dict(SCHEDULE)[n] for n in sched_names]
 
-    default_comp = ", ".join(_get("filters", "exclude_companies", []))
-    exclude_comp = Prompt.ask(
-        "  Исключить компании (через запятую, или Enter — не исключать)",
-        default=default_comp, console=console,
-    )
-    exclude_companies = [c.strip() for c in exclude_comp.split(",") if c.strip()] if exclude_comp.strip() else []
+    # === 2. Фильтры ===
+    console.print("\n[bold]2. Фильтры[/bold]\n")
 
-    # === Отклик ===
-    console.print()
-    console.print("[bold]3. Отклик[/bold]")
+    default_kw = ", ".join(_get("filters", "exclude_keywords", []) or [])
+    exclude_kw = inquirer.text(
+        message="Исключить слова из названий (через запятую):",
+        default=default_kw,
+    ).execute()
+    exclude_keywords = [w.strip() for w in exclude_kw.split(",") if w.strip()]
+
+    default_comp = ", ".join(_get("filters", "exclude_companies", []) or [])
+    exclude_comp = inquirer.text(
+        message="Исключить компании (через запятую):",
+        default=default_comp,
+    ).execute()
+    exclude_companies = [c.strip() for c in exclude_comp.split(",") if c.strip()]
+
+    default_pattern = _get("filters", "exclude_pattern", "")
+    exclude_pattern = inquirer.text(
+        message="Regex исключение (напр. junior|стажёр|bitrix):",
+        default=str(default_pattern) if default_pattern else "",
+    ).execute()
+
+    # === 3. Отклик ===
+    console.print("\n[bold]3. Отклик[/bold]\n")
+
     default_max = _get("apply", "max_applications", 50)
-    max_apps = IntPrompt.ask("  Максимум откликов за запуск", default=int(default_max), console=console)
+    max_str = inquirer.text(
+        message="Максимум откликов за запуск:",
+        default=str(int(default_max)),
+        validate=lambda x: x.isdigit() and int(x) > 0,
+        invalid_message="Введите число > 0",
+    ).execute()
+    max_apps = int(max_str)
 
     default_use_letter = _get("apply", "use_cover_letter", True)
-    use_cover_letter = Confirm.ask("  Использовать сопроводительное письмо?", default=bool(default_use_letter), console=console)
+    use_cover_letter = inquirer.confirm(
+        message="Использовать сопроводительное письмо?",
+        default=bool(default_use_letter),
+    ).execute()
+
     cover_letter = ""
     if use_cover_letter:
-        console.print("  [dim]Введите текст (Enter для шаблона по умолчанию):[/dim]")
-        default_letter = _get("apply", "cover_letter", "")
-        cover_input = Prompt.ask("  Сопроводительное", default=str(default_letter).strip() if default_letter else "", console=console)
-        if cover_input.strip():
-            cover_letter = cover_input.strip()
-        else:
+        default_letter = str(_get("apply", "cover_letter", "")).strip()
+        cover_letter = inquirer.text(
+            message="Текст письма (Enter = шаблон по умолчанию):",
+            default=default_letter if default_letter else "",
+        ).execute()
+        if not cover_letter.strip():
             cover_letter = "Здравствуйте!\n\nМеня заинтересовала ваша вакансия. Буду рад обсудить детали.\n\nС уважением"
 
     # === Собираем конфиг ===
@@ -253,6 +242,7 @@ def init():
         "filters": {
             "exclude_companies": exclude_companies,
             "exclude_keywords": exclude_keywords,
+            "exclude_pattern": exclude_pattern.strip() if exclude_pattern else "",
             "skip_foreign": False,
             "skip_test_vacancies": True,
         },
@@ -279,7 +269,6 @@ def init():
     if schedule:
         config["search"]["schedule"] = schedule
 
-    # Сохраняем
     with open(target, "w", encoding="utf-8") as f:
         yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
@@ -294,6 +283,8 @@ def init():
     ))
 
 
+# ==================== LOGIN ====================
+
 @main.command()
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def login(config):
@@ -307,20 +298,16 @@ def login(config):
 
     if not Path(config).exists():
         console.print(f"[red]Конфиг не найден: {config}[/red]")
-        console.print("Сначала запустите: [bold]hh-apply init[/bold]")
+        console.print("Запустите: [bold]hh-apply init[/bold]")
         return
 
     cfg = load_config(config)
     storage_path = get_storage_path(cfg)
     storage_path.parent.mkdir(parents=True, exist_ok=True)
 
-    console.print("[bold blue]hh-apply login[/bold blue]")
-    console.print()
+    console.print("[bold blue]hh-apply login[/bold blue]\n")
 
     with sync_playwright() as pw:
-        # Для логина — чистый браузер, минимум аргументов.
-        # Stealth-патчи и кастомные args нужны для откликов, не для логина.
-        # hh.ru усиленно защищает страницу авторизации.
         browser = pw.chromium.launch(
             headless=False,
             args=["--no-first-run", "--no-default-browser-check"],
@@ -337,13 +324,9 @@ def login(config):
             page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
         except Exception:
             console.print("[yellow]Страница загружается медленно, но браузер открыт.[/yellow]")
-            console.print("[yellow]Если видите страницу — продолжайте логин.[/yellow]")
 
-        console.print()
         console.print("Браузер открыт. Залогиньтесь на hh.ru.")
-        console.print("Не торопитесь — введите код, дождитесь загрузки.")
-        console.print("Когда увидите главную страницу hh.ru — вернитесь сюда.")
-        console.print()
+        console.print("Не торопитесь — введите код, дождитесь загрузки.\n")
 
         try:
             input(">>> Нажмите Enter когда залогинитесь: ")
@@ -355,12 +338,11 @@ def login(config):
                 pass
             sys.exit(1)
 
-        # Проверяем логин — с мягкой навигацией
         try:
             page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(2000)
         except Exception:
-            console.print("[dim]Навигация медленная, проверяю текущую страницу...[/dim]")
+            pass
 
         if check_logged_in(page):
             context.storage_state(path=str(storage_path))
@@ -368,7 +350,6 @@ def login(config):
             console.print("Запускайте: [bold]hh-apply run[/bold]")
         else:
             console.print("\n[red]Логин не подтверждён.[/red]")
-            console.print("[dim]Убедитесь что вы залогинены и попробуйте ещё раз.[/dim]")
 
         try:
             browser.close()
@@ -376,23 +357,24 @@ def login(config):
             pass
 
 
+# ==================== RUN ====================
+
 @main.command()
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 @click.option("--limit", "-l", type=int, help="Макс. количество откликов")
 @click.option("--headless", is_flag=True, help="Скрытый режим браузера")
 @click.option("--dry-run", is_flag=True, help="Только поиск, без откликов")
 @click.option("--report", "-r", type=str, help="Сохранить отчёт в файл")
-@click.option("--exclude", "-e", type=str, help="Regex для исключения вакансий (напр. junior|стажёр)")
+@click.option("--exclude", "-e", type=str, help="Regex исключение (напр. junior|стажёр)")
 def run(config, limit, headless, dry_run, report, exclude):
     """Запустить автоотклики.
 
     \b
     Примеры:
-      hh-apply run                        # Запуск с настройками из config.yaml
+      hh-apply run                        # Интерактивный режим
       hh-apply run --limit 10             # Максимум 10 откликов
       hh-apply run --dry-run              # Только посмотреть вакансии
       hh-apply run -e "junior|стажёр"     # Исключить по regex
-      hh-apply run --limit 5 --dry-run    # Посмотреть 5 вакансий
     """
     from hh_apply.config import load_config
     from hh_apply.runner import run as do_run
@@ -401,32 +383,31 @@ def run(config, limit, headless, dry_run, report, exclude):
 
     if not Path(config).exists():
         console.print(f"[red]Конфиг не найден: {config}[/red]")
-        console.print("Сначала запустите: [bold]hh-apply init[/bold]")
+        console.print("Запустите: [bold]hh-apply init[/bold]")
         return
 
     cfg = load_config(config)
 
-    # Интерактивный режим — если не передали ни одного аргумента
-    has_any_option = any([limit, headless, dry_run, report, exclude])
-    if not has_any_option:
-        console.print("[bold blue]hh-apply run[/bold blue] — интерактивный режим\n")
+    # Интерактивный режим если нет аргументов
+    if not any([limit, headless, dry_run, report, exclude]):
+        console.print("[bold blue]hh-apply run[/bold blue]\n")
 
-        # Лимит
-        limit_input = Prompt.ask(
-            "  Сколько откликов? (Enter = из конфига)",
-            default="", console=console,
-        )
-        if limit_input.strip().isdigit():
-            limit = int(limit_input.strip())
+        limit_str = inquirer.text(
+            message="Сколько откликов? (Enter = из конфига)",
+            default="",
+        ).execute()
+        if limit_str.strip().isdigit():
+            limit = int(limit_str.strip())
 
-        # Dry run
-        dry_run = Confirm.ask("  Пробный режим (без откликов)?", default=False, console=console)
+        dry_run = inquirer.confirm(
+            message="Пробный режим (без откликов)?",
+            default=False,
+        ).execute()
 
-        # Exclude
-        exclude_input = Prompt.ask(
-            "  Исключить вакансии по regex? (Enter = пропустить)",
-            default="", console=console,
-        )
+        exclude_input = inquirer.text(
+            message="Regex исключение (Enter = пропустить):",
+            default="",
+        ).execute()
         if exclude_input.strip():
             exclude = exclude_input.strip()
 
@@ -440,6 +421,8 @@ def run(config, limit, headless, dry_run, report, exclude):
     do_run(cfg, dry_run=dry_run, report_path=report, exclude_pattern=exclude)
 
 
+# ==================== STATS ====================
+
 @main.command()
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def stats(config):
@@ -452,7 +435,7 @@ def stats(config):
     db_path = get_db_path(cfg)
 
     if not db_path.exists():
-        console.print("[yellow]База данных не найдена. Сначала запустите: hh-apply run[/yellow]")
+        console.print("[yellow]Нет данных. Запустите: hh-apply run[/yellow]")
         return
 
     with Tracker(db_path) as tracker:
@@ -461,9 +444,9 @@ def stats(config):
 
         table = Table(title="Статистика откликов hh-apply", border_style="blue")
         table.add_column("Статус", style="bold")
-        table.add_column("Количество", justify="right")
+        table.add_column("Кол-во", justify="right")
 
-        status_names = {
+        names = {
             "sent": "[green]Отправлен[/green]",
             "cover_letter_sent": "[green]С письмом[/green]",
             "letter_sent": "[green]С письмом[/green]",
@@ -473,30 +456,26 @@ def stats(config):
             "error": "[red]Ошибка[/red]",
             "filtered": "[dim]Отфильтровано[/dim]",
             "captcha": "[yellow]Капча[/yellow]",
-            "no_button": "[dim]Нет кнопки[/dim]",
         }
-
         for status, count in sorted(st.items(), key=lambda x: x[1], reverse=True):
-            name = status_names.get(status, status)
-            table.add_row(name, str(count))
-
+            table.add_row(names.get(status, status), str(count))
         table.add_section()
         table.add_row("[bold]Всего[/bold]", f"[bold]{total}[/bold]")
-
         console.print(table)
 
+
+# ==================== DONE ====================
 
 @main.command()
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 @click.argument("vacancy_id", required=False)
 def done(config, vacancy_id):
-    """Отметить тестовую вакансию как решённую (убрать из списка).
+    """Убрать тестовую вакансию из списка.
 
     \b
-    Использование:
-      hh-apply done                  # Интерактивный выбор
-      hh-apply done 12345678         # Убрать по ID вакансии
-      hh-apply done all              # Очистить все тестовые
+      hh-apply done              # Интерактивный выбор
+      hh-apply done 12345678     # По ID
+      hh-apply done all          # Очистить все
     """
     from hh_apply.config import load_config, get_db_path, get_data_dir
     from hh_apply.tracker import Tracker
@@ -506,74 +485,68 @@ def done(config, vacancy_id):
     db_path = get_db_path(cfg)
 
     if not db_path.exists():
-        console.print("[yellow]База данных не найдена.[/yellow]")
+        console.print("[yellow]Нет данных.[/yellow]")
         return
 
     with Tracker(db_path) as tracker:
+        test_path = get_data_dir(cfg) / "test_vacancies.txt"
+
         if vacancy_id == "all":
             tracker.clear_skipped("test_required")
-            console.print("[green]Все тестовые вакансии удалены из списка.[/green]")
-            # Обновляем файл
-            test_path = get_data_dir(cfg) / "test_vacancies.txt"
             tracker.export_skipped_tests(test_path)
+            console.print("[green]Все тестовые удалены.[/green]")
             return
 
         if vacancy_id:
             if tracker.remove_skipped(vacancy_id):
-                console.print(f"[green]Вакансия {vacancy_id} убрана из списка.[/green]")
+                console.print(f"[green]Вакансия {vacancy_id} убрана.[/green]")
             else:
-                console.print(f"[yellow]Вакансия {vacancy_id} не найдена в пропущенных.[/yellow]")
-            # Обновляем файл
-            test_path = get_data_dir(cfg) / "test_vacancies.txt"
+                console.print(f"[yellow]Не найдена: {vacancy_id}[/yellow]")
             tracker.export_skipped_tests(test_path)
             return
 
-        # Интерактивный режим — показываем список тестовых
+        # Интерактивный — стрелочное меню
         tests = tracker.get_skipped("test_required")
         if not tests:
-            console.print("[dim]Нет тестовых вакансий в списке.[/dim]")
+            console.print("[dim]Нет тестовых вакансий.[/dim]")
             return
 
-        console.print(f"[bold]Тестовые вакансии ({len(tests)} шт.):[/bold]\n")
-        for i, t in enumerate(tests, 1):
-            console.print(f"  {i}. {t['title']} — {t['company']}")
-            console.print(f"     [cyan]{t['url']}[/cyan]")
-            console.print(f"     [dim]ID: {t['vacancy_id']}[/dim]")
-            console.print()
+        choices = [
+            f"{t['title'][:50]} — {t['company'][:20]}  ({t['vacancy_id']})"
+            for t in tests
+        ]
+        choices.append("Очистить все")
+        choices.append("Отмена")
 
-        choice = Prompt.ask(
-            "Номер вакансии для удаления (или 'all' для очистки, Enter — отмена)",
-            default="", console=console,
-        )
+        selected = inquirer.select(
+            message=f"Тестовые вакансии ({len(tests)} шт.):",
+            choices=choices,
+        ).execute()
 
-        if not choice.strip():
+        if selected == "Отмена":
             return
-
-        if choice.strip().lower() == "all":
+        if selected == "Очистить все":
             tracker.clear_skipped("test_required")
-            console.print("[green]Все тестовые вакансии удалены.[/green]")
-        elif choice.strip().isdigit():
-            idx = int(choice.strip())
-            if 1 <= idx <= len(tests):
-                vid = tests[idx - 1]["vacancy_id"]
-                tracker.remove_skipped(vid)
-                console.print(f"[green]Убрано: {tests[idx - 1]['title']}[/green]")
-            else:
-                console.print("[red]Неверный номер.[/red]")
+            console.print("[green]Все тестовые удалены.[/green]")
+        else:
+            # Находим ID
+            idx = choices.index(selected)
+            vid = tests[idx]["vacancy_id"]
+            tracker.remove_skipped(vid)
+            console.print(f"[green]Убрано: {tests[idx]['title']}[/green]")
 
-        # Обновляем файл
-        test_path = get_data_dir(cfg) / "test_vacancies.txt"
         tracker.export_skipped_tests(test_path)
 
+
+# ==================== API-LOGIN ====================
 
 @main.command(name="api-login")
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def api_login(config):
     """OAuth авторизация для API-команд (whoami, boost)."""
-    import asyncio
     from urllib.parse import parse_qs, urlsplit
     from hh_apply.config import load_config, get_data_dir
-    from hh_apply.api_client import HHApiClient, ANDROID_CLIENT_ID
+    from hh_apply.api_client import HHApiClient
     from patchright.sync_api import sync_playwright
 
     console = Console()
@@ -581,12 +554,10 @@ def api_login(config):
     data_dir = get_data_dir(cfg)
     client = HHApiClient(data_dir / "api_token.json")
 
-    console.print("[bold blue]hh-apply api-login[/bold blue]")
-    console.print("Откроется браузер для OAuth авторизации.\n")
+    console.print("[bold blue]hh-apply api-login[/bold blue]\n")
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=False)
-        # Эмулируем Android-устройство
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 14; SM-A556B) AppleWebKit/537.36 Chrome/136.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915},
@@ -608,18 +579,16 @@ def api_login(config):
         page.on("request", handle_request)
         page.goto(client.authorize_url)
 
-        console.print("Залогиньтесь в браузере.")
-        console.print("После логина вернитесь сюда и нажмите [bold]Enter[/bold].")
+        console.print("Залогиньтесь в браузере.\n")
 
         try:
-            # Ждём OAuth код или ручной ввод
-            for _ in range(300):  # 5 минут
+            for _ in range(300):
                 page.wait_for_timeout(1000)
                 if auth_code:
                     break
             else:
                 if not auth_code:
-                    input("\n>>> Нажмите Enter если залогинились: ")
+                    input(">>> Нажмите Enter если залогинились: ")
         except (EOFError, KeyboardInterrupt):
             browser.close()
             return
@@ -632,8 +601,10 @@ def api_login(config):
 
     client.exchange_code(auth_code)
     console.print("[green]API авторизация успешна![/green]")
-    console.print("Теперь доступны: [bold]hh-apply whoami[/bold], [bold]hh-apply boost[/bold]")
+    console.print("Доступны: [bold]hh-apply whoami[/bold], [bold]hh-apply boost[/bold]")
 
+
+# ==================== WHOAMI ====================
 
 @main.command()
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
@@ -641,52 +612,6 @@ def whoami(config):
     """Проверить аккаунт: ID, имя, резюме, просмотры.
 
     \b
-    Требует предварительной OAuth-авторизации:
-      hh-apply api-login
-    """
-    from hh_apply.config import load_config, get_data_dir
-    from hh_apply.api_client import HHApiClient
-
-    console = Console()
-    cfg = load_config(config)
-    data_dir = get_data_dir(cfg)
-    client = HHApiClient(data_dir / "api_token.json")
-
-    if not client.is_authenticated:
-        console.print("[red]Не авторизован. Запустите: hh-apply api-login[/red]")
-        return
-
-    try:
-        me = client.whoami()
-    except Exception as e:
-        console.print(f"[red]Ошибка: {e}[/red]")
-        console.print("Попробуйте: [bold]hh-apply api-login[/bold]")
-        return
-
-    full_name = " ".join(filter(None, [
-        me.get("last_name"),
-        me.get("first_name"),
-        me.get("middle_name"),
-    ])) or "Аноним"
-
-    counters = me.get("counters", {})
-    resumes = counters.get("resumes_count", 0)
-    views = counters.get("new_resume_views", 0)
-    unread = counters.get("unread_negotiations", 0)
-
-    console.print(
-        f"\U0001f194 {me.get('id', '?')} {full_name} "
-        f"[ \U0001f4c4 {resumes} | \U0001f441\ufe0f +{views} | \u2709\ufe0f +{unread} ]"
-    )
-
-
-@main.command()
-@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
-def boost(config):
-    """Поднять все резюме в поиске.
-
-    \b
-    Поднимает резюме наверх в выдаче рекрутеров.
     Требует: hh-apply api-login
     """
     from hh_apply.config import load_config, get_data_dir
@@ -694,11 +619,47 @@ def boost(config):
 
     console = Console()
     cfg = load_config(config)
-    data_dir = get_data_dir(cfg)
-    client = HHApiClient(data_dir / "api_token.json")
+    client = HHApiClient(get_data_dir(cfg) / "api_token.json")
 
     if not client.is_authenticated:
-        console.print("[red]Не авторизован. Запустите: hh-apply api-login[/red]")
+        console.print("[red]Запустите: hh-apply api-login[/red]")
+        return
+
+    try:
+        me = client.whoami()
+    except Exception as e:
+        console.print(f"[red]Ошибка: {e}[/red]")
+        return
+
+    name = " ".join(filter(None, [me.get("last_name"), me.get("first_name"), me.get("middle_name")])) or "Аноним"
+    c = me.get("counters", {})
+    console.print(
+        f"\U0001f194 {me.get('id', '?')} {name} "
+        f"[ \U0001f4c4 {c.get('resumes_count', 0)} "
+        f"| \U0001f441\ufe0f +{c.get('new_resume_views', 0)} "
+        f"| \u2709\ufe0f +{c.get('unread_negotiations', 0)} ]"
+    )
+
+
+# ==================== BOOST ====================
+
+@main.command()
+@click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
+def boost(config):
+    """Поднять все резюме в поиске.
+
+    \b
+    Требует: hh-apply api-login
+    """
+    from hh_apply.config import load_config, get_data_dir
+    from hh_apply.api_client import HHApiClient
+
+    console = Console()
+    cfg = load_config(config)
+    client = HHApiClient(get_data_dir(cfg) / "api_token.json")
+
+    if not client.is_authenticated:
+        console.print("[red]Запустите: hh-apply api-login[/red]")
         return
 
     try:
@@ -712,23 +673,19 @@ def boost(config):
         return
 
     for resume in resumes:
-        status = resume.get("status", {}).get("id", "")
-        if status != "published":
-            console.print(f"[dim]Пропуск (не опубликовано): {resume.get('title', '?')}[/dim]")
+        if resume.get("status", {}).get("id") != "published":
             continue
-
         if not resume.get("can_publish_or_update"):
             console.print(f"[yellow]Нельзя обновить: {resume.get('title', '?')}[/yellow]")
             continue
-
         try:
             client.boost_resume(resume["id"])
-            url = resume.get("alternate_url", "")
-            title = resume.get("title", "?")
-            console.print(f"\u2705 Обновлено {url} — {title}")
+            console.print(f"\u2705 Обновлено {resume.get('alternate_url', '')} — {resume.get('title', '?')}")
         except Exception as e:
             console.print(f"[red]Ошибка: {e}[/red]")
 
+
+# ==================== QUERY ====================
 
 @main.command()
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
@@ -740,10 +697,9 @@ def query(config, csv_export, output, sql):
 
     \b
     Примеры:
-      hh-apply query                                              # Показать подсказку
-      hh-apply query "SELECT * FROM applications"                 # Все отклики
-      hh-apply query "SELECT * FROM skipped_vacancies"            # Пропущенные
-      hh-apply query "SELECT * FROM applications" --csv -o f.csv  # Экспорт CSV
+      hh-apply query "SELECT * FROM applications"
+      hh-apply query "SELECT * FROM skipped_vacancies"
+      hh-apply query "SELECT * FROM applications" --csv -o out.csv
     """
     import csv as csv_module
     import io
@@ -755,19 +711,19 @@ def query(config, csv_export, output, sql):
     db_path = get_db_path(cfg)
 
     if not db_path.exists():
-        console.print("[yellow]База данных не найдена.[/yellow]")
+        console.print("[yellow]Нет данных.[/yellow]")
         return
 
     if not sql:
-        console.print("[dim]Доступные таблицы: applications, skipped_vacancies[/dim]")
-        console.print("[dim]Пример: hh-apply query \"SELECT * FROM skipped_vacancies WHERE reason='test_required'\"[/dim]")
+        console.print("[dim]Таблицы: applications, skipped_vacancies[/dim]")
+        console.print('[dim]Пример: hh-apply query "SELECT * FROM applications"[/dim]')
         return
 
     with Tracker(db_path) as tracker:
         try:
             columns, rows = tracker.execute_query(sql)
         except Exception as e:
-            console.print(f"[red]Ошибка SQL: {e}[/red]")
+            console.print(f"[red]SQL ошибка: {e}[/red]")
             return
 
     if not rows:
@@ -779,13 +735,11 @@ def query(config, csv_export, output, sql):
         writer = csv_module.writer(buf)
         writer.writerow(columns)
         writer.writerows(rows)
-        csv_text = buf.getvalue()
-
         if output:
-            Path(output).write_text(csv_text, encoding="utf-8")
+            Path(output).write_text(buf.getvalue(), encoding="utf-8")
             console.print(f"[green]Экспорт: {output} ({len(rows)} строк)[/green]")
         else:
-            print(csv_text)
+            print(buf.getvalue())
     else:
         table = Table(border_style="blue")
         for col in columns:
