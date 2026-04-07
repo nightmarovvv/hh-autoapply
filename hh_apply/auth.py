@@ -410,18 +410,19 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
     return browser, context
 
 
-def create_login_context(playwright: Playwright, config: dict, headless: bool = False) -> tuple:
+def create_login_context(playwright: Playwright, config: dict) -> tuple:
     """Создаёт persistent browser context для логина.
 
     Persistent context = реальный профиль браузера с сохранением на диск.
-    Выглядит как настоящий Chrome, не палится антиботами hh.ru.
+    На Windows использует системный Chrome (channel="chrome") потому что
+    Patchright Chromium палится hh.ru и вызывает бесконечную загрузку.
 
-    headless=True для автоматического логина (телефон, пароль) — браузер скрыт.
-    headless=False для ручного логина — пользователь видит браузер.
+    Браузер всегда видимый (headless=False) — hh.ru блокирует headless.
 
     Возвращает (browser=None, context).
     Закрывать через context.close().
     """
+    import platform
     from hh_apply.config import get_data_dir
 
     os.environ["TZ"] = "Europe/Moscow"
@@ -429,14 +430,27 @@ def create_login_context(playwright: Playwright, config: dict, headless: bool = 
     data_dir = get_data_dir(config)
     profile_dir = str(data_dir / "browser_profile")
 
-    context = playwright.chromium.launch_persistent_context(
+    launch_kwargs = dict(
         user_data_dir=profile_dir,
-        headless=headless,
+        headless=False,
         args=["--no-first-run", "--no-default-browser-check"],
         viewport=random_viewport(),
         locale="ru-RU",
         timezone_id="Europe/Moscow",
     )
+
+    # На Windows Patchright Chromium палится hh.ru — используем системный Chrome
+    if platform.system() == "Windows":
+        try:
+            context = playwright.chromium.launch_persistent_context(
+                channel="chrome",
+                **launch_kwargs,
+            )
+            return None, context
+        except Exception:
+            pass  # Chrome не установлен — fallback на Patchright
+
+    context = playwright.chromium.launch_persistent_context(**launch_kwargs)
 
     return None, context
 

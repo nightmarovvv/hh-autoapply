@@ -384,12 +384,9 @@ def login(config):
     }
 
     login_fn = LOGIN_METHODS[method]
-    # Для автоматических способов браузер скрыт — всё через терминал
-    # Для ручного — браузер видимый, пользователь сам вводит данные
-    headless = method != "Сам в браузере (откроется hh.ru)"
 
     with sync_playwright() as pw:
-        browser, context = create_login_context(pw, cfg, headless=headless)
+        browser, context = create_login_context(pw, cfg)
         page = context.pages[0] if context.pages else context.new_page()
 
         try:
