@@ -366,10 +366,12 @@ def login(config):
     console.print("[bold blue]hh-apply login[/bold blue]\n")
 
     with sync_playwright() as pw:
-        # Лёгкий стелс для логина — без JS-инъекций которые ломают форму hh.ru
+        # Persistent context = реальный профиль браузера.
+        # Обычный context на Windows зависает при логине на hh.ru.
         browser, context = create_login_context(pw, cfg)
 
-        page = context.new_page()
+        # persistent context уже имеет дефолтную страницу
+        page = context.pages[0] if context.pages else context.new_page()
 
         try:
             page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
@@ -384,7 +386,7 @@ def login(config):
         except (EOFError, KeyboardInterrupt):
             console.print("\n[yellow]Прервано[/yellow]")
             try:
-                browser.close()
+                context.close()
             except Exception:
                 pass
             sys.exit(1)
@@ -405,7 +407,7 @@ def login(config):
             console.print("\n[red]Логин не подтверждён.[/red]")
 
         try:
-            browser.close()
+            context.close()
         except Exception:
             pass
 

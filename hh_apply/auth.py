@@ -79,30 +79,34 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
 
 
 def create_login_context(playwright: Playwright, config: dict) -> tuple:
-    """Создаёт (browser, context) для логина — максимально чистый браузер.
+    """Создаёт persistent browser context для логина.
 
-    hh.ru усиленно защищает страницу авторизации. Любые stealth-патчи,
-    кастомные launch args, user-agent подмена — всё это вызывает бесконечную
-    загрузку после ввода номера телефона. Для логина используем Patchright
-    как есть — пользователь всё равно логинится руками.
+    Persistent context = реальный профиль браузера с сохранением на диск.
+    В отличие от обычного context, он:
+    - Выглядит как настоящий Chrome (свой профиль, кеш, localStorage)
+    - Не определяется антибот-системами hh.ru
+    - Работает на Windows (обычный context на Windows зависает)
+
+    Возвращает (browser=None, context) — у persistent context нет отдельного browser.
+    Закрывать через context.close().
     """
+    from hh_apply.config import get_data_dir
+
     os.environ["TZ"] = "Europe/Moscow"
 
-    browser = playwright.chromium.launch(
+    data_dir = get_data_dir(config)
+    profile_dir = str(data_dir / "browser_profile")
+
+    context = playwright.chromium.launch_persistent_context(
+        user_data_dir=profile_dir,
         headless=False,
         args=["--no-first-run", "--no-default-browser-check"],
-    )
-
-    context = browser.new_context(
         viewport=random_viewport(),
         locale="ru-RU",
         timezone_id="Europe/Moscow",
     )
-    # НЕ применяем apply_stealth — ломает форму логина hh.ru
-    # НЕ подменяем user_agent — hh.ru блокирует нестандартные
-    # НЕ загружаем storage_state — начинаем с чистого листа
 
-    return browser, context
+    return None, context
 
 
 def check_logged_in(page: Page) -> bool:
