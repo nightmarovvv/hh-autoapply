@@ -433,10 +433,12 @@ def create_login_context(playwright: Playwright, config: dict) -> tuple:
     launch_kwargs = dict(
         user_data_dir=profile_dir,
         headless=False,
-        args=["--no-first-run", "--no-default-browser-check"],
         viewport=random_viewport(),
         locale="ru-RU",
         timezone_id="Europe/Moscow",
+        # Никаких args — Playwright по умолчанию добавляет --no-sandbox
+        # и другие флаги которые палятся. ignore_default_args убирает их.
+        ignore_default_args=["--no-sandbox", "--disable-setuid-sandbox"],
     )
 
     # Системный Chrome не палится антиботом hh.ru — пробуем его первым
