@@ -206,7 +206,7 @@ def init():
 def login(config):
     """Войти в hh.ru и сохранить сессию."""
     from hh_apply.config import load_config, get_storage_path
-    from hh_apply.stealth import apply_stealth, random_viewport, random_user_agent
+    from hh_apply.stealth import random_viewport
     from hh_apply.auth import check_logged_in
     from patchright.sync_api import sync_playwright
 
@@ -225,32 +225,21 @@ def login(config):
     console.print()
 
     with sync_playwright() as pw:
+        # Для логина — чистый браузер, минимум аргументов.
+        # Stealth-патчи и кастомные args нужны для откликов, не для логина.
+        # hh.ru усиленно защищает страницу авторизации.
         browser = pw.chromium.launch(
             headless=False,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--no-first-run",
-                "--no-default-browser-check",
-            ],
-            ignore_default_args=[
-                "--enable-automation",
-                "--disable-popup-blocking",
-                "--disable-component-update",
-                "--disable-default-apps",
-            ],
+            args=["--no-first-run", "--no-default-browser-check"],
         )
         context = browser.new_context(
             viewport=random_viewport(),
             locale="ru-RU",
             timezone_id="Europe/Moscow",
-            user_agent=random_user_agent(),
         )
-        apply_stealth(context)
 
         page = context.new_page()
 
-        # Навигация с увеличенным таймаутом и обработкой ошибок
         try:
             page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
         except Exception:
