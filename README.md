@@ -82,28 +82,61 @@ sudo apt update && sudo apt install -y python3 python3-pip python3-venv
 
 ---
 
-### Шаг 2. Установите hh-apply
+### Шаг 2. Создайте папку и виртуальное окружение
 
-macOS / Linux:
+Виртуальное окружение — это изолированная песочница. Все команды (`hh-apply`, `patchright`) будут работать внутри неё без проблем с PATH.
+
+**macOS / Linux:**
+
 ```bash
-pip3 install git+https://github.com/nightmarovvv/hh-autoapply.git
+mkdir ~/hh-apply && cd ~/hh-apply
 ```
 
-Windows:
+```bash
+python3 -m venv .venv
 ```
+
+```bash
+source .venv/bin/activate
+```
+
+**Windows:**
+
+```
+mkdir %USERPROFILE%\hh-apply && cd %USERPROFILE%\hh-apply
+```
+
+```
+python -m venv .venv
+```
+
+```
+.venv\Scripts\activate
+```
+
+> После активации в начале строки терминала появится `(.venv)` — это значит окружение включено.
+
+---
+
+### Шаг 3. Установите hh-apply
+
+```bash
 pip install git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
 > Побегут строки — это скачивание. Дождитесь `Successfully installed`.
 
-Если пишет `pip: command not found` или `pip не является командой`:
-
 <details>
-<summary><b>Как исправить</b></summary>
+<summary><b>Если пишет pip: command not found</b></summary>
 
-**macOS / Linux** — попробуйте так:
+macOS / Linux:
 ```bash
 python3 -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
+```
+
+Windows:
+```
+python -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
 Если и это не работает — pip не установлен:
@@ -112,22 +145,13 @@ python3 -m ensurepip --upgrade
 ```
 И повторите установку.
 
----
-
-**Windows** — попробуйте так:
-```
-python -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
-```
-
-Если и это не работает — Python установлен без pip. Удалите Python через **Параметры → Приложения**, скачайте заново с [python.org](https://www.python.org/downloads/) и при установке поставьте все галочки.
-
 </details>
 
 ---
 
-### Шаг 3. Скачайте браузер
+### Шаг 4. Скачайте браузер
 
-hh-apply работает через скрытый браузер Chromium. Его нужно скачать один раз:
+hh-apply работает через скрытый браузер Chromium. Скачайте его один раз:
 
 ```bash
 patchright install chromium
@@ -135,26 +159,9 @@ patchright install chromium
 
 > На Linux также выполните: `patchright install-deps chromium`
 
-Если пишет `patchright: command not found`:
-
-<details>
-<summary><b>Как исправить</b></summary>
-
-macOS / Linux:
-```bash
-python3 -m patchright install chromium
-```
-
-Windows:
-```
-python -m patchright install chromium
-```
-
-</details>
-
 ---
 
-### Шаг 4. Проверьте
+### Шаг 5. Проверьте
 
 ```bash
 hh-apply --version
@@ -162,19 +169,31 @@ hh-apply --version
 
 Видите номер версии (например `1.1.0`)? Всё работает! Переходите к [быстрому старту](#быстрый-старт).
 
-> Если пишет "не найдено" / "не является командой" — смотрите [Частые проблемы](#частые-проблемы).
+---
+
+### Как запускать в следующий раз
+
+Каждый раз когда хотите запустить hh-apply — сначала активируйте окружение:
+
+**macOS / Linux:**
+```bash
+cd ~/hh-apply && source .venv/bin/activate
+```
+
+**Windows:**
+```
+cd %USERPROFILE%\hh-apply && .venv\Scripts\activate
+```
+
+После этого `hh-apply` работает как обычно.
 
 ---
 
 ### Обновление до последней версии
 
-macOS / Linux:
-```bash
-pip3 install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
-```
+Активируйте окружение (см. выше), затем:
 
-Windows:
-```
+```bash
 pip install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
@@ -322,138 +341,50 @@ browser:
 ## Частые проблемы
 
 <details>
-<summary><b>"python" / "pip" не найден (macOS / Linux)</b></summary>
+<summary><b>"python" / "python3" не найден</b></summary>
 
-На macOS и Linux команда называется `python3`, а не `python`. Используйте:
-
+**macOS / Linux:** команда называется `python3`, не `python`:
 ```bash
 python3 --version
 ```
 
-```bash
-python3 -m pip install ...
-```
+**Windows:** если `python` открывает Microsoft Store — Python не установлен. Скачайте с [python.org/downloads](https://www.python.org/downloads/). При установке **обязательно поставьте галочку "Add python.exe to PATH"**. Потом **перезапустите PowerShell**.
 
-Если `python3` тоже не найден — Python не установлен. Вернитесь к [разделу установки](#установка).
+Если забыли галочку — удалите Python через **Параметры → Приложения**, скачайте заново и поставьте.
 
 </details>
 
 <details>
-<summary><b>"python" открывает Microsoft Store (Windows)</b></summary>
+<summary><b>"hh-apply" не найдена / не является командой</b></summary>
 
-Это значит Python не установлен. Скачайте его с [python.org/downloads](https://www.python.org/downloads/).
+Скорее всего вы не активировали виртуальное окружение. Перед запуском выполните:
 
-При установке **обязательно** поставьте галочку **"Add python.exe to PATH"**. Если забыли — удалите Python через "Установка и удаление программ", скачайте заново и на этот раз поставьте.
+**macOS / Linux:**
+```bash
+cd ~/hh-apply && source .venv/bin/activate
+```
 
-После установки **перезапустите PowerShell**.
+**Windows:**
+```
+cd %USERPROFILE%\hh-apply && .venv\Scripts\activate
+```
+
+В начале строки должно появиться `(.venv)`. После этого `hh-apply` будет работать.
+
+Если папки `~/hh-apply` нет — вернитесь к [Шагу 2 установки](#шаг-2-создайте-папку-и-виртуальное-окружение).
 
 </details>
 
 <details>
-<summary><b>"hh-apply" не является внутренней или внешней командой (Windows)</b></summary>
+<summary><b>Бесконечная загрузка при логине</b></summary>
 
-Python установил hh-apply в папку которую Windows не видит. Исправим за одну команду — **закройте PowerShell, откройте заново** и выполните:
-
-```
-pip install --force-reinstall git+https://github.com/nightmarovvv/hh-autoapply.git
-```
-
-После этого попробуйте снова:
-
-```
-hh-apply --version
-```
-
-Всё ещё не работает? Тогда используйте альтернативный запуск (работает всегда):
-
-```
-python -m hh_apply.cli --version
-```
-
-```
-python -m hh_apply.cli init
-```
-
-```
-python -m hh_apply.cli run
-```
-
-</details>
-
-<details>
-<summary><b>hh-apply: command not found (macOS / Linux)</b></summary>
-
-pip установил программу в папку которая не в PATH. Выполните одну команду и всё заработает:
-
-**macOS (zsh):**
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
-```
-
-**Linux (bash):**
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
-```
-
-Проверьте:
-```bash
-hh-apply --version
-```
-
-Всё ещё не работает? Используйте альтернативный запуск:
+Если после ввода номера телефона страница зависает и не переходит к вводу кода — обновите hh-apply:
 
 ```bash
-python3 -m hh_apply.cli --version
+pip install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
-```bash
-python3 -m hh_apply.cli init
-```
-
-```bash
-python3 -m hh_apply.cli run
-```
-
-</details>
-
-<details>
-<summary><b>"git" не найден</b></summary>
-
-Git нужен для установки. Установите:
-
-**macOS:**
-```bash
-brew install git
-```
-
-**Windows:** скачайте с [git-scm.com](https://git-scm.com/download/win) и установите. Потом **перезапустите PowerShell**.
-
-**Linux:**
-```bash
-sudo apt install git
-```
-
-</details>
-
-<details>
-<summary><b>Ошибка при установке Chromium</b></summary>
-
-Если `patchright install chromium` выдаёт ошибку:
-
-**Проверьте что patchright установлен:**
-```bash
-pip3 install patchright
-```
-
-**Повторите установку браузера:**
-```bash
-patchright install chromium
-```
-
-**На Linux нужны системные зависимости:**
-```bash
-patchright install-deps chromium
-```
+В новой версии логин использует антидетект-браузер, который не блокируется hh.ru.
 
 </details>
 
@@ -478,13 +409,26 @@ hh-apply login
 <details>
 <summary><b>Кракозябры / UnicodeDecodeError (Windows)</b></summary>
 
-Терминал Windows не всегда поддерживает русские символы. Решения:
+Установите [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) из Microsoft Store — он поддерживает русские символы из коробки.
 
-**Лучшее:** установите [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) из Microsoft Store — он поддерживает UTF-8 из коробки.
-
-**Быстрое:** выполните перед запуском:
+Или выполните перед запуском:
 ```
 chcp 65001
+```
+
+</details>
+
+<details>
+<summary><b>Ошибка при установке Chromium на Linux</b></summary>
+
+Нужны системные зависимости:
+```bash
+patchright install-deps chromium
+```
+
+Затем повторите:
+```bash
+patchright install chromium
 ```
 
 </details>

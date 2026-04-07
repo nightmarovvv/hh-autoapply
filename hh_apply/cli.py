@@ -344,8 +344,7 @@ def _validate_config_search(config: dict, console: Console) -> None:
 def login(config):
     """Войти в hh.ru и сохранить сессию."""
     from hh_apply.config import load_config, get_storage_path
-    from hh_apply.stealth import random_viewport
-    from hh_apply.auth import check_logged_in
+    from hh_apply.auth import create_context, check_logged_in
     from patchright.sync_api import sync_playwright
 
     console = Console()
@@ -356,21 +355,17 @@ def login(config):
         return
 
     cfg = load_config(config)
+    # Форсируем headless=False для логина (нужно видеть браузер)
+    cfg["browser"]["headless"] = False
     storage_path = get_storage_path(cfg)
     storage_path.parent.mkdir(parents=True, exist_ok=True)
 
     console.print("[bold blue]hh-apply login[/bold blue]\n")
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            headless=False,
-            args=["--no-first-run", "--no-default-browser-check"],
-        )
-        context = browser.new_context(
-            viewport=random_viewport(),
-            locale="ru-RU",
-            timezone_id="Europe/Moscow",
-        )
+        # Используем create_context со стелсом — без него hh.ru
+        # детектит автоматизацию и вешает загрузку при вводе кода
+        browser, context = create_context(pw, cfg)
 
         page = context.new_page()
 
