@@ -382,6 +382,10 @@ def _check_captcha(page: Page) -> bool:
 def _handle_captcha(page: Page) -> str:
     """Интерактивное решение капчи: картинка в терминале + ввод."""
     solved = solve_captcha_interactive(page)
+    if solved:
+        page.wait_for_timeout(3000)
+        if _check_sent(page):
+            return STATUS_SENT
     return STATUS_CAPTCHA
 
 
