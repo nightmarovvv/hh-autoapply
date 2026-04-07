@@ -1,11 +1,9 @@
-"""Авторизация на hh.ru через Playwright."""
+"""Авторизация на hh.ru через нативный браузер + Patchright для откликов."""
 
 from __future__ import annotations
 
-import getpass
 import os
 import platform
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -15,400 +13,104 @@ from patchright.sync_api import Page, Playwright
 from hh_apply.stealth import apply_stealth, random_viewport, random_user_agent, get_chromium_version
 
 
-# === Селекторы формы логина hh.ru (с fallback-цепочками) ===
+# === Поиск браузеров на компе ===
 
-PHONE_INPUT_SELECTORS = [
-    'input[data-qa="login-input-username"]',
-    'input[name="username"]',
-    'input[type="tel"]',
-    'input[autocomplete="tel"]',
-    'input[placeholder*="телефон" i]',
-    'input[placeholder*="phone" i]',
-]
-
-CODE_INPUT_SELECTORS = [
-    'input[data-qa="login-input-code"]',
-    'input[name="code"]',
-    'input[inputmode="numeric"]',
-    'input[autocomplete="one-time-code"]',
-    'input[data-qa="otp-code-input"]',
-]
-
-EMAIL_INPUT_SELECTORS = [
-    'input[data-qa="login-input-username"]',
-    'input[name="username"]',
-    'input[type="email"]',
-    'input[autocomplete="email"]',
-    'input[placeholder*="почт" i]',
-    'input[placeholder*="email" i]',
-]
-
-PASSWORD_INPUT_SELECTORS = [
-    'input[data-qa="login-input-password"]',
-    'input[name="password"]',
-    'input[type="password"]',
-    'input[autocomplete="current-password"]',
-]
-
-SUBMIT_SELECTORS = [
-    'button[data-qa="account-login-submit"]',
-    'button[data-qa="login-button-submit"]',
-    'button[type="submit"]',
-]
-
-PASSWORD_TAB_SELECTORS = [
-    '[data-qa="expand-login-by-password"]',
-    'button:has-text("По паролю")',
-    'a:has-text("По паролю")',
-    'span:has-text("По паролю")',
-    '[data-qa="login-by-password"]',
-]
-
-
-def _find_element(page: Page, selectors: list[str], timeout: int = 3000):
-    """Находит первый видимый элемент из списка селекторов."""
-    for sel in selectors:
-        el = page.locator(sel)
-        try:
-            if el.count() > 0 and el.first.is_visible(timeout=timeout):
-                return el.first
-        except Exception:
-            continue
-    return None
-
-
-def _click_submit(page: Page) -> bool:
-    """Кликает кнопку отправки формы."""
-    btn = _find_element(page, SUBMIT_SELECTORS)
-    if btn:
-        btn.click()
-        return True
-    # Fallback: ищем кнопку по тексту
-    for text in ["Войти", "Продолжить", "Получить код", "Далее"]:
-        fallback = page.locator(f'button:has-text("{text}")')
-        if fallback.count() > 0:
-            fallback.first.click()
-            return True
-    return False
-
-
-# Кнопки которые нужно нажать чтобы попасть на форму логина
-LOGIN_PAGE_ENTRY_SELECTORS = [
-    '[data-qa="login"]',
-    '[data-qa="account-login"]',
-    'a[href*="/account/login"]',
-    'button:has-text("Войти")',
-    'a:has-text("Войти")',
-]
-
-
-def _navigate_to_login_form(page: Page, console: Console) -> bool:
-    """Открывает hh.ru и добирается до формы ввода телефона/email.
-
-    hh.ru может показать главную страницу где нужно сначала нажать "Войти",
-    а потом уже появится форма. Обрабатываем это.
-    """
-    try:
-        page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
-    except Exception:
-        console.print("[yellow]Страница загружается медленно...[/yellow]")
-
-    page.wait_for_timeout(2000)
-
-    # Проверяем — уже на странице с полем ввода?
-    phone_input = _find_element(page, PHONE_INPUT_SELECTORS, timeout=2000)
-    if phone_input:
-        return True
-
-    # Нет поля — ищем кнопку "Войти" и кликаем
-    entry_btn = _find_element(page, LOGIN_PAGE_ENTRY_SELECTORS, timeout=3000)
-    if entry_btn:
-        entry_btn.click()
-        page.wait_for_timeout(3000)
-
-    # Пробуем ещё раз перейти напрямую
-    if not _find_element(page, PHONE_INPUT_SELECTORS, timeout=2000):
-        try:
-            page.goto("https://hh.ru/account/login?backurl=%2F", timeout=30000, wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
-        except Exception:
-            pass
-
-    return _find_element(page, PHONE_INPUT_SELECTORS, timeout=3000) is not None
-
-
-def _check_login_error(page: Page) -> str | None:
-    """Проверяет наличие ошибки на странице логина."""
-    error_selectors = [
-        '[data-qa="login-error-message"]',
-        '[class*="login-error"]',
-        '[class*="form-error"]',
-        '[role="alert"]',
-    ]
-    for sel in error_selectors:
-        el = page.locator(sel)
-        if el.count() > 0:
-            text = el.first.text_content()
-            if text and text.strip():
-                return text.strip()
-    return None
-
-
-# === Три способа логина ===
-
-def login_manual(page: Page, console: Console) -> bool:
-    """Ручной логин — пользователь сам вводит данные в браузере."""
-    try:
-        page.goto("https://hh.ru/account/login", timeout=60000, wait_until="domcontentloaded")
-    except Exception:
-        console.print("[yellow]Страница загружается медленно, но браузер открыт.[/yellow]")
-
-    console.print("Браузер открыт. Залогиньтесь на hh.ru.")
-    console.print("Не торопитесь — введите код, дождитесь загрузки.\n")
-
-    try:
-        input(">>> Нажмите Enter когда залогинитесь: ")
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-    try:
-        page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2000)
-    except Exception:
-        pass
-
-    return check_logged_in(page)
-
-
-def login_phone(page: Page, console: Console) -> bool:
-    """Логин по номеру телефона + SMS-код из терминала."""
-    console.print("[dim]Открываю страницу логина...[/dim]")
-
-    if not _navigate_to_login_form(page, console):
-        console.print("[red]Не удалось открыть форму логина.[/red]")
-        console.print("[dim]Попробуйте 'Сам в браузере'.[/dim]")
-        return False
-
-    # 1. Ввод номера телефона
-    try:
-        phone = input("\n>>> Номер телефона (например +79991234567): ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-    if not phone:
-        console.print("[red]Номер не введён.[/red]")
-        return False
-
-    phone_input = _find_element(page, PHONE_INPUT_SELECTORS)
-    if not phone_input:
-        console.print("[red]Не удалось найти поле ввода телефона.[/red]")
-        console.print("[dim]Попробуйте 'Сам в браузере'.[/dim]")
-        return False
-
-    phone_input.fill(phone)
-    page.wait_for_timeout(500)
-
-    # 2. Нажимаем кнопку
-    if not _click_submit(page):
-        console.print("[red]Не удалось нажать кнопку отправки.[/red]")
-        return False
-
-    console.print("[dim]Отправлено. Ожидаем SMS...[/dim]")
-    page.wait_for_timeout(3000)
-
-    # Проверяем ошибку
-    error = _check_login_error(page)
-    if error:
-        console.print(f"[red]Ошибка: {error}[/red]")
-        return False
-
-    # 3. Ввод SMS-кода
-    code_input = _find_element(page, CODE_INPUT_SELECTORS, timeout=10000)
-    if not code_input:
-        # Может быть, сразу залогинило (уже авторизован)
-        if check_logged_in(page):
-            return True
-        console.print("[red]Не удалось найти поле ввода кода.[/red]")
-        console.print("[dim]Попробуйте 'Сам в браузере'.[/dim]")
-        return False
-
-    try:
-        sms_code = input(">>> SMS-код: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-    if not sms_code:
-        console.print("[red]Код не введён.[/red]")
-        return False
-
-    code_input.fill(sms_code)
-    page.wait_for_timeout(500)
-
-    # Нажимаем подтвердить
-    _click_submit(page)
-    page.wait_for_timeout(5000)
-
-    # Проверяем ошибку
-    error = _check_login_error(page)
-    if error:
-        console.print(f"[red]Ошибка: {error}[/red]")
-        return False
-
-    # Проверяем логин
-    try:
-        page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2000)
-    except Exception:
-        pass
-
-    return check_logged_in(page)
-
-
-def login_password(page: Page, console: Console) -> bool:
-    """Логин по email + паролю из терминала."""
-    console.print("[dim]Открываю страницу логина...[/dim]")
-
-    if not _navigate_to_login_form(page, console):
-        console.print("[red]Не удалось открыть форму логина.[/red]")
-        console.print("[dim]Попробуйте 'Сам в браузере'.[/dim]")
-        return False
-
-    # Переключаемся на вкладку "По паролю" если есть
-    password_tab = _find_element(page, PASSWORD_TAB_SELECTORS, timeout=3000)
-    if password_tab:
-        password_tab.click()
-        page.wait_for_timeout(1500)
-
-    # 1. Ввод email
-    try:
-        email = input("\n>>> Email: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-    if not email:
-        console.print("[red]Email не введён.[/red]")
-        return False
-
-    email_input = _find_element(page, EMAIL_INPUT_SELECTORS)
-    if not email_input:
-        console.print("[red]Не удалось найти поле email.[/red]")
-        console.print("[dim]Попробуйте 'Сам в браузере'.[/dim]")
-        return False
-
-    email_input.fill(email)
-    page.wait_for_timeout(500)
-
-    # 2. Ввод пароля
-    try:
-        password = getpass.getpass(">>> Пароль (не отображается): ")
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-    if not password:
-        console.print("[red]Пароль не введён.[/red]")
-        return False
-
-    password_input = _find_element(page, PASSWORD_INPUT_SELECTORS)
-    if not password_input:
-        # Может поле пароля появляется после ввода email + submit
-        _click_submit(page)
-        page.wait_for_timeout(2000)
-        password_input = _find_element(page, PASSWORD_INPUT_SELECTORS)
-
-    if not password_input:
-        console.print("[red]Не удалось найти поле пароля.[/red]")
-        console.print("[dim]Возможно, для этого аккаунта доступен только вход по SMS.[/dim]")
-        return False
-
-    password_input.fill(password)
-    page.wait_for_timeout(500)
-
-    # 3. Отправляем
-    _click_submit(page)
-    page.wait_for_timeout(5000)
-
-    # Проверяем ошибку
-    error = _check_login_error(page)
-    if error:
-        console.print(f"[red]Ошибка: {error}[/red]")
-        return False
-
-    # Проверяем логин
-    try:
-        page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2000)
-    except Exception:
-        pass
-
-    return check_logged_in(page)
-
-
-def _find_chrome_path() -> str | None:
-    """Находит путь к Google Chrome на текущей ОС."""
+def _find_browser() -> tuple[str, str] | None:
+    """Находит любой Chromium-based браузер. Возвращает (путь, название) или None."""
     system = platform.system()
 
     if system == "Windows":
-        candidates = [
-            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
-            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
-            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        browsers = [
+            ("Google Chrome", [
+                os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+            ]),
+            ("Microsoft Edge", [
+                os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+            ]),
+            ("Brave", [
+                os.path.expandvars(r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+                os.path.expandvars(r"%LocalAppData%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+            ]),
+            ("Vivaldi", [
+                os.path.expandvars(r"%LocalAppData%\Vivaldi\Application\vivaldi.exe"),
+            ]),
+            ("Yandex Browser", [
+                os.path.expandvars(r"%LocalAppData%\Yandex\YandexBrowser\Application\browser.exe"),
+            ]),
         ]
     elif system == "Darwin":
-        candidates = [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browsers = [
+            ("Google Chrome", ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]),
+            ("Brave", ["/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"]),
+            ("Microsoft Edge", ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]),
+            ("Vivaldi", ["/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"]),
+            ("Yandex Browser", ["/Applications/Yandex.app/Contents/MacOS/Yandex"]),
+            ("Chromium", ["/Applications/Chromium.app/Contents/MacOS/Chromium"]),
         ]
     else:
-        candidates = [
-            "/usr/bin/google-chrome",
-            "/usr/bin/google-chrome-stable",
-            "/usr/bin/chromium-browser",
-            "/usr/bin/chromium",
+        browsers = [
+            ("Google Chrome", ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"]),
+            ("Chromium", ["/usr/bin/chromium-browser", "/usr/bin/chromium"]),
+            ("Brave", ["/usr/bin/brave-browser", "/usr/bin/brave-browser-stable"]),
+            ("Microsoft Edge", ["/usr/bin/microsoft-edge", "/usr/bin/microsoft-edge-stable"]),
+            ("Vivaldi", ["/usr/bin/vivaldi", "/usr/bin/vivaldi-stable"]),
         ]
 
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
+    for name, paths in browsers:
+        for path in paths:
+            if os.path.isfile(path):
+                return path, name
 
-    # Попробуем через which/where
+    # Fallback: ищем через which/where
     cmd = "where" if system == "Windows" else "which"
-    for name in ["google-chrome", "chrome", "chromium"]:
+    search_names = {
+        "google-chrome": "Google Chrome",
+        "chrome": "Google Chrome",
+        "chromium": "Chromium",
+        "brave-browser": "Brave",
+        "msedge": "Microsoft Edge",
+        "vivaldi": "Vivaldi",
+    }
+    for binary, name in search_names.items():
         try:
-            result = subprocess.run([cmd, name], capture_output=True, text=True)
+            result = subprocess.run([cmd, binary], capture_output=True, text=True)
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().split("\n")[0]
+                return result.stdout.strip().split("\n")[0], name
         except Exception:
             pass
 
     return None
 
 
-def login_native_browser(config: dict, console: Console) -> bool:
-    """Логин через нативный Chrome БЕЗ Playwright.
+# === Логин через нативный браузер ===
 
-    Запускает настоящий Chrome как обычный процесс (subprocess),
+def login_native_browser(config: dict, console: Console) -> bool:
+    """Логин через нативный браузер БЕЗ Playwright.
+
+    Запускает настоящий браузер как обычный процесс (subprocess),
     без CDP, без автоматизации. hh.ru не может отличить от обычного
     юзера. Пользователь логинится сам, потом мы забираем куки из профиля.
-
-    Это единственный способ который работает на Windows — Playwright/Patchright
-    палятся антиботом hh.ru при логине.
     """
     from hh_apply.config import get_data_dir, get_storage_path
 
-    chrome_path = _find_chrome_path()
-    if not chrome_path:
-        console.print("[red]Google Chrome не найден.[/red]")
-        console.print("[dim]Установите Chrome: https://www.google.com/chrome/[/dim]")
+    found = _find_browser()
+    if not found:
+        console.print("[red]Не найден ни один браузер (Chrome, Edge, Brave, Vivaldi, Yandex Browser).[/red]")
+        console.print("[dim]Установите любой Chromium-браузер и попробуйте снова.[/dim]")
         return False
 
+    browser_path, browser_name = found
     data_dir = get_data_dir(config)
     profile_dir = str(data_dir / "browser_profile")
     storage_path = get_storage_path(config)
 
-    console.print(f"[dim]Запускаю Chrome...[/dim]")
+    console.print(f"[dim]Запускаю {browser_name}...[/dim]")
 
-    # Запускаем Chrome с отдельным профилем
     proc = subprocess.Popen([
-        chrome_path,
+        browser_path,
         f"--user-data-dir={profile_dir}",
         "--no-first-run",
         "--no-default-browser-check",
@@ -416,7 +118,7 @@ def login_native_browser(config: dict, console: Console) -> bool:
     ])
 
     console.print()
-    console.print("[bold]Chrome открыт. Залогиньтесь на hh.ru как обычно.[/bold]")
+    console.print(f"[bold]{browser_name} открыт. Залогиньтесь на hh.ru как обычно.[/bold]")
     console.print("После логина вернитесь сюда.\n")
 
     try:
@@ -425,15 +127,14 @@ def login_native_browser(config: dict, console: Console) -> bool:
         proc.terminate()
         return False
 
-    # Закрываем Chrome чтобы куки записались на диск
-    console.print("[dim]Закрываю Chrome и сохраняю сессию...[/dim]")
+    console.print("[dim]Закрываю браузер и сохраняю сессию...[/dim]")
     proc.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         proc.kill()
 
-    # Теперь открываем тот же профиль через Playwright чтобы экспортировать storage_state
+    # Открываем тот же профиль через Playwright headless чтобы экспортировать storage_state
     from patchright.sync_api import sync_playwright
 
     try:
@@ -462,7 +163,7 @@ def login_native_browser(config: dict, console: Console) -> bool:
         return False
 
 
-# === Контексты ===
+# === Контексты для откликов (Patchright со стелсом) ===
 
 def _get_launch_kwargs(config: dict) -> dict:
     """Базовые аргументы запуска Chromium с антидетектом."""
@@ -498,7 +199,7 @@ def _get_launch_kwargs(config: dict) -> dict:
 
 
 def create_context(playwright: Playwright, config: dict) -> tuple:
-    """Создаёт (browser, context) с антидетект-мерами."""
+    """Создаёт (browser, context) с антидетект-мерами для откликов."""
     from hh_apply.config import get_storage_path
 
     storage_path = get_storage_path(config)
@@ -532,51 +233,7 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
     return browser, context
 
 
-def create_login_context(playwright: Playwright, config: dict) -> tuple:
-    """Создаёт persistent browser context для логина.
-
-    Persistent context = реальный профиль браузера с сохранением на диск.
-    На Windows использует системный Chrome (channel="chrome") потому что
-    Patchright Chromium палится hh.ru и вызывает бесконечную загрузку.
-
-    Браузер всегда видимый (headless=False) — hh.ru блокирует headless.
-
-    Возвращает (browser=None, context).
-    Закрывать через context.close().
-    """
-    import platform
-    from hh_apply.config import get_data_dir
-
-    os.environ["TZ"] = "Europe/Moscow"
-
-    data_dir = get_data_dir(config)
-    profile_dir = str(data_dir / "browser_profile")
-
-    launch_kwargs = dict(
-        user_data_dir=profile_dir,
-        headless=False,
-        viewport=random_viewport(),
-        locale="ru-RU",
-        timezone_id="Europe/Moscow",
-        # Никаких args — Playwright по умолчанию добавляет --no-sandbox
-        # и другие флаги которые палятся. ignore_default_args убирает их.
-        ignore_default_args=["--no-sandbox", "--disable-setuid-sandbox"],
-    )
-
-    # Системный Chrome не палится антиботом hh.ru — пробуем его первым
-    try:
-        context = playwright.chromium.launch_persistent_context(
-            channel="chrome",
-            **launch_kwargs,
-        )
-        return None, context
-    except Exception:
-        pass  # Chrome не установлен — fallback на Patchright Chromium
-
-    context = playwright.chromium.launch_persistent_context(**launch_kwargs)
-
-    return None, context
-
+# === Проверка авторизации ===
 
 def check_logged_in(page: Page) -> bool:
     """Проверяет авторизацию на текущей странице."""

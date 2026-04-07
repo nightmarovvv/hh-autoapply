@@ -348,13 +348,8 @@ def _validate_config_search(config: dict, console: Console) -> None:
 @click.option("--config", "-c", default="config.yaml", help="Путь к конфигу")
 def login(config):
     """Войти в hh.ru и сохранить сессию."""
-    import platform as _platform
     from hh_apply.config import load_config, get_storage_path
-    from hh_apply.auth import (
-        create_login_context, login_manual, login_phone, login_password,
-        login_native_browser,
-    )
-    from patchright.sync_api import sync_playwright
+    from hh_apply.auth import login_native_browser
 
     console = Console()
 
@@ -369,66 +364,16 @@ def login(config):
 
     console.print("[bold blue]hh-apply login[/bold blue]\n")
 
-    # На Windows "Через Chrome" — дефолтный и рекомендуемый способ
-    is_windows = _platform.system() == "Windows"
-    default_choice = "Через свой Chrome (рекомендуется)" if is_windows else "По номеру телефона (SMS-код)"
+    success = login_native_browser(cfg, console)
 
-    method = inquirer.select(
-        message="Как войти?",
-        choices=[
-            "Через свой Chrome (рекомендуется)",
-            "По номеру телефона (SMS-код)",
-            "По email и паролю",
-            "Встроенный браузер (может не работать на Windows)",
-        ],
-        default=default_choice,
-    ).execute()
-
-    # "Через свой Chrome" — отдельная ветка, без Playwright
-    if method == "Через свой Chrome (рекомендуется)":
-        success = login_native_browser(cfg, console)
-        if success:
-            console.print(f"\n[green]Сессия сохранена![/green]")
-            console.print("\n[bold]Следующий шаг:[/bold]")
-            console.print("  [bold]hh-apply run --dry-run[/bold] — пробный запуск")
-            console.print("  [bold]hh-apply run[/bold]           — боевые отклики")
-        else:
-            console.print("\n[red]Логин не подтверждён.[/red]")
-            console.print("[dim]Попробуйте другой способ входа.[/dim]")
-        return
-
-    # Остальные методы — через Playwright
-    LOGIN_METHODS = {
-        "По номеру телефона (SMS-код)": login_phone,
-        "По email и паролю": login_password,
-        "Встроенный браузер (может не работать на Windows)": login_manual,
-    }
-
-    login_fn = LOGIN_METHODS[method]
-
-    with sync_playwright() as pw:
-        browser, context = create_login_context(pw, cfg)
-        page = context.pages[0] if context.pages else context.new_page()
-
-        try:
-            success = login_fn(page, console)
-
-            if success:
-                context.storage_state(path=str(storage_path))
-                console.print(f"\n[green]Сессия сохранена![/green]")
-                console.print("\n[bold]Следующий шаг:[/bold]")
-                console.print("  [bold]hh-apply run --dry-run[/bold] — пробный запуск")
-                console.print("  [bold]hh-apply run[/bold]           — боевые отклики")
-            else:
-                console.print("\n[red]Логин не подтверждён.[/red]")
-                console.print("[dim]Попробуйте другой способ входа.[/dim]")
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[yellow]Прервано[/yellow]")
-        finally:
-            try:
-                context.close()
-            except Exception:
-                pass
+    if success:
+        console.print(f"\n[green]Сессия сохранена![/green]")
+        console.print("\n[bold]Следующий шаг:[/bold]")
+        console.print("  [bold]hh-apply run --dry-run[/bold] — пробный запуск")
+        console.print("  [bold]hh-apply run[/bold]           — боевые отклики")
+    else:
+        console.print("\n[red]Логин не подтверждён.[/red]")
+        console.print("[dim]Убедитесь что вы полностью залогинились в браузере перед нажатием Enter.[/dim]")
 
 
 # ==================== RUN ====================
