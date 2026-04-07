@@ -201,8 +201,14 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
             try:
                 page = context.new_page()
 
-                if not login_if_needed(page, config):
-                    console.print("[red]Не авторизован. Запустите: hh-apply login[/red]")
+                try:
+                    if not login_if_needed(page, config):
+                        console.print("[red]Не авторизован.[/red]")
+                        console.print("[dim]Запустите: [bold]hh-apply login[/bold][/dim]")
+                        return
+                except Exception:
+                    console.print("[red]Не удалось проверить авторизацию (проблема с сетью).[/red]")
+                    console.print("[dim]Проверьте интернет и попробуйте снова.[/dim]")
                     return
 
                 console.print("[green]Авторизован[/green]\n")
@@ -211,6 +217,7 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                     do_search(page, config)
                 except Exception as e:
                     console.print(f"[red]Ошибка поиска: {e}[/red]")
+                    console.print("[dim]Проверьте интернет или измените фильтры в конфиге.[/dim]")
                     return
 
                 if _check_captcha(page):
@@ -263,10 +270,14 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
 
                             # Session check каждые 15 откликов
                             if (sent + skipped) > 0 and (sent + skipped) % 15 == 0:
-                                if not check_logged_in(page):
+                                try:
+                                    logged_in = check_logged_in(page)
+                                except Exception:
+                                    logged_in = True  # Лучше продолжить чем остановиться
+                                if not logged_in:
                                     # Retry авторизации
                                     if not login_if_needed(page, config):
-                                        progress.log_lines.append(Text.from_markup("[red]Сессия истекла[/red]"))
+                                        progress.log_lines.append(Text.from_markup("[red]Сессия истекла. Запустите: hh-apply login[/red]"))
                                         live.update(progress.build_display())
                                         shutdown = True
                                         break
@@ -444,4 +455,7 @@ def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages
         )
 
     console.print(table)
-    console.print(f"\n[dim]Всего: {len(all_vacancies)} вакансий для отклика[/dim]")
+    console.print(f"\n[green]Найдено {len(all_vacancies)} вакансий для отклика.[/green]")
+    console.print("\n[dim]Это пробный режим — отклики НЕ отправлены.[/dim]")
+    console.print("[dim]Запустите [bold]hh-apply run[/bold] чтобы откликнуться на эти вакансии.[/dim]")
+    console.print("[dim]Хотите изменить фильтры? Отредактируйте config.yaml или запустите [bold]hh-apply init[/bold][/dim]")
