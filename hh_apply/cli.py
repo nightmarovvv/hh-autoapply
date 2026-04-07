@@ -135,6 +135,11 @@ def init(output):
     console.print()
     console.print(Panel("[bold blue]hh-apply[/bold blue] — настройка", border_style="blue"))
     console.print()
+    console.print("[dim]Подсказки:[/dim]")
+    console.print("[dim]  Стрелки ↑↓  — выбрать вариант[/dim]")
+    console.print("[dim]  Пробел      — отметить/снять (в списках с галочками)[/dim]")
+    console.print("[dim]  Enter       — подтвердить выбор или пропустить (оставить пустым)[/dim]")
+    console.print()
 
     # === 1. Поиск ===
     console.print("[bold]1. Поиск[/bold]\n")
@@ -344,7 +349,7 @@ def _validate_config_search(config: dict, console: Console) -> None:
 def login(config):
     """Войти в hh.ru и сохранить сессию."""
     from hh_apply.config import load_config, get_storage_path
-    from hh_apply.auth import create_context, check_logged_in
+    from hh_apply.auth import create_login_context, check_logged_in
     from patchright.sync_api import sync_playwright
 
     console = Console()
@@ -355,17 +360,14 @@ def login(config):
         return
 
     cfg = load_config(config)
-    # Форсируем headless=False для логина (нужно видеть браузер)
-    cfg["browser"]["headless"] = False
     storage_path = get_storage_path(cfg)
     storage_path.parent.mkdir(parents=True, exist_ok=True)
 
     console.print("[bold blue]hh-apply login[/bold blue]\n")
 
     with sync_playwright() as pw:
-        # Используем create_context со стелсом — без него hh.ru
-        # детектит автоматизацию и вешает загрузку при вводе кода
-        browser, context = create_context(pw, cfg)
+        # Лёгкий стелс для логина — без JS-инъекций которые ломают форму hh.ru
+        browser, context = create_login_context(pw, cfg)
 
         page = context.new_page()
 

@@ -10,6 +10,39 @@ from patchright.sync_api import Page, Playwright
 from hh_apply.stealth import apply_stealth, random_viewport, random_user_agent, get_chromium_version
 
 
+def _get_launch_kwargs(config: dict) -> dict:
+    """Базовые аргументы запуска Chromium с антидетектом."""
+    browser_config = config.get("browser", {})
+
+    launch_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+
+    ignore_args = [
+        "--enable-automation",
+        "--disable-popup-blocking",
+        "--disable-component-update",
+        "--disable-default-apps",
+    ]
+
+    proxy = browser_config.get("proxy")
+    if not proxy:
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
+
+    kwargs = dict(
+        headless=browser_config.get("headless", False),
+        args=launch_args,
+        ignore_default_args=ignore_args,
+    )
+    if proxy:
+        kwargs["proxy"] = {"server": proxy}
+
+    return kwargs
+
+
 def create_context(playwright: Playwright, config: dict) -> tuple:
     """Создаёт (browser, context) с антидетект-мерами."""
     from hh_apply.config import get_storage_path
@@ -19,42 +52,12 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
 
     os.environ["TZ"] = "Europe/Moscow"
 
-    browser_config = config.get("browser", {})
-    launch_args = [
-        "--disable-blink-features=AutomationControlled",
-        "--disable-features=IsolateOrigins,site-per-process",
-        "--no-first-run",
-        "--no-default-browser-check",
-    ]
-
-    # Убираем флаги, которые выдают автоматизацию
-    ignore_args = [
-        "--enable-automation",
-        "--disable-popup-blocking",
-        "--disable-component-update",
-        "--disable-default-apps",
-    ]
-
-    # Прокси: конфиг → env переменные → None
-    proxy = browser_config.get("proxy")
-    if not proxy:
-        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
-
-    launch_kwargs = dict(
-        headless=browser_config.get("headless", False),
-        args=launch_args,
-        ignore_default_args=ignore_args,
-    )
-    if proxy:
-        launch_kwargs["proxy"] = {"server": proxy}
-
-    browser = playwright.chromium.launch(**launch_kwargs)
+    browser = playwright.chromium.launch(**_get_launch_kwargs(config))
 
     viewport = random_viewport()
     ua = random_user_agent()
 
     real_version = get_chromium_version(browser)
-    # Подставляем реальную версию Chromium
     for ver in ("136", "135", "134", "133"):
         ua = ua.replace(f"Chrome/{ver}.0.0.0", f"Chrome/{real_version}.0.0.0")
 
@@ -71,6 +74,33 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
 
     context = browser.new_context(**ctx_kwargs)
     apply_stealth(context)
+
+    return browser, context
+
+
+def create_login_context(playwright: Playwright, config: dict) -> tuple:
+    """Создаёт (browser, context) для логина — максимально чистый браузер.
+
+    hh.ru усиленно защищает страницу авторизации. Любые stealth-патчи,
+    кастомные launch args, user-agent подмена — всё это вызывает бесконечную
+    загрузку после ввода номера телефона. Для логина используем Patchright
+    как есть — пользователь всё равно логинится руками.
+    """
+    os.environ["TZ"] = "Europe/Moscow"
+
+    browser = playwright.chromium.launch(
+        headless=False,
+        args=["--no-first-run", "--no-default-browser-check"],
+    )
+
+    context = browser.new_context(
+        viewport=random_viewport(),
+        locale="ru-RU",
+        timezone_id="Europe/Moscow",
+    )
+    # НЕ применяем apply_stealth — ломает форму логина hh.ru
+    # НЕ подменяем user_agent — hh.ru блокирует нестандартные
+    # НЕ загружаем storage_state — начинаем с чистого листа
 
     return browser, context
 
