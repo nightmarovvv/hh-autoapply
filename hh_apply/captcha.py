@@ -18,6 +18,7 @@ from pathlib import Path
 from patchright.sync_api import Page
 
 from hh_apply.notifications import alert_captcha
+from hh_apply.stealth import human_wait
 
 
 def _supports_kitty() -> bool:
@@ -60,20 +61,86 @@ def render_image_file(image_bytes: bytes) -> str:
     return str(path)
 
 
+def _render_sixel(image_bytes: bytes) -> bool:
+    """Рендерит через Sixel. Возвращает True если удалось."""
+    try:
+        from PIL import Image
+        import io
+
+        img = Image.open(io.BytesIO(image_bytes))
+        # Resize для терминала (макс 400px ширина)
+        if img.width > 400:
+            ratio = 400 / img.width
+            img = img.resize((400, int(img.height * ratio)))
+
+        # Sixel через PIL — конвертируем в палитру
+        img = img.convert("P", palette=Image.ADAPTIVE, colors=256)
+
+        # Генерируем Sixel escape sequence
+        width, height = img.size
+        pixels = list(img.getdata())
+        palette = img.getpalette()
+
+        # Sixel header
+        output = "\033Pq"
+        # Color registers
+        for i in range(min(256, max(pixels) + 1)):
+            r = palette[i * 3] * 100 // 255
+            g = palette[i * 3 + 1] * 100 // 255
+            b = palette[i * 3 + 2] * 100 // 255
+            output += f"#{i};2;{r};{g};{b}"
+
+        # Pixel data (6 rows at a time)
+        for y_base in range(0, height, 6):
+            for color in range(max(pixels) + 1):
+                line = f"#{color}"
+                has_data = False
+                for x in range(width):
+                    sixel = 0
+                    for dy in range(6):
+                        y = y_base + dy
+                        if y < height and pixels[y * width + x] == color:
+                            sixel |= 1 << dy
+                    if sixel > 0:
+                        has_data = True
+                    line += chr(63 + sixel)
+                if has_data:
+                    output += line + "$"
+            output += "-"
+
+        output += "\033\\"
+        sys.stdout.write(output)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return True
+    except ImportError:
+        return False
+    except Exception:
+        return False
+
+
 def render_captcha_in_terminal(image_bytes: bytes) -> None:
-    """Показывает капчу: Kitty → Sixel → файл."""
+    """Показывает капчу: Kitty → Sixel → файл + браузер."""
     if _supports_kitty():
         print("\n[Капча — Kitty Graphics]")
         render_image_kitty(image_bytes)
+    elif _supports_sixel():
+        print("\n[Капча — Sixel]")
+        if not _render_sixel(image_bytes):
+            _fallback_file(image_bytes)
     else:
-        # Fallback: сохраняем в файл
-        path = render_image_file(image_bytes)
-        print(f"\n[Капча сохранена: {path}]")
-        try:
-            webbrowser.open(f"file://{path}")
-        except Exception:
-            pass
-        print(f"Откройте файл для просмотра: {path}")
+        _fallback_file(image_bytes)
+
+
+def _fallback_file(image_bytes: bytes) -> None:
+    """Fallback: сохранить в файл и открыть."""
+    path = render_image_file(image_bytes)
+    print(f"\n[Капча сохранена: {path}]")
+    try:
+        webbrowser.open(f"file://{path}")
+    except Exception:
+        pass
+    print(f"Откройте файл для просмотра: {path}")
 
 
 def solve_captcha_interactive(page: Page) -> bool:
@@ -128,7 +195,7 @@ def solve_captcha_interactive(page: Page) -> bool:
         # Ждём ручного решения в браузере
         print("Ожидаю решения в браузере...")
         for _ in range(60):
-            page.wait_for_timeout(2000)
+            human_wait(page, 2000)
             if not _check_captcha_present(page):
                 print("Капча решена!")
                 return True
@@ -140,7 +207,7 @@ def solve_captcha_interactive(page: Page) -> bool:
         if el.count() > 0:
             el.first.fill(text)
             el.first.press("Enter")
-            page.wait_for_timeout(3000)
+            human_wait(page, 3000)
             if not _check_captcha_present(page):
                 print("Капча решена!")
                 return True
@@ -151,7 +218,7 @@ def solve_captcha_interactive(page: Page) -> bool:
     # Если не нашли поле — может, это iframe-капча
     print("[!] Поле ввода капчи не найдено. Решите в браузере.")
     for _ in range(60):
-        page.wait_for_timeout(2000)
+        human_wait(page, 2000)
         if not _check_captcha_present(page):
             return True
     return False
