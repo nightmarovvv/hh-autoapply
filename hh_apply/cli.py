@@ -929,7 +929,12 @@ def _schedule_set(time_str: str, config_path: str, weekdays: bool, console: Cons
 
     dow = "1-5" if weekdays else "*"
     config_abs = str(Path(config_path).resolve())
-    cmd = f'cd "{Path.cwd()}" && hh-apply run --headless -c "{config_abs}"'
+    log_file = str(Path(config_abs).parent / "hh-apply-cron.log")
+
+    # Полный путь к hh-apply (cron не видит venv PATH)
+    import shutil
+    hh_path = shutil.which("hh-apply") or "hh-apply"
+    cmd = f'cd "{Path.cwd()}" && {hh_path} run --headless -c "{config_abs}" >> "{log_file}" 2>&1'
     cron_line = f"{minute} {hour} * * {dow} {cmd}"
 
     # Добавляем в crontab
@@ -959,7 +964,11 @@ def _schedule_boost(hours: int, config_path: str, console: Console) -> None:
         return
 
     config_abs = str(Path(config_path).resolve())
-    cmd = f'cd "{Path.cwd()}" && hh-apply boost -c "{config_abs}"'
+    log_file = str(Path(config_abs).parent / "hh-apply-cron.log")
+
+    import shutil
+    hh_path = shutil.which("hh-apply") or "hh-apply"
+    cmd = f'cd "{Path.cwd()}" && {hh_path} boost -c "{config_abs}" >> "{log_file}" 2>&1'
     cron_line = f"0 */{hours} * * * {cmd}"
 
     try:
@@ -1068,11 +1077,17 @@ def query(config, csv_export, output, sql):
         console.print('[dim]Пример: hh-apply query "SELECT * FROM applications"[/dim]')
         return
 
-    # Защита от случайного DELETE/DROP
-    if not sql.strip().upper().startswith("SELECT"):
+    # Защита от случайного DELETE/DROP/UPDATE
+    sql_upper = sql.strip().upper()
+    if not sql_upper.startswith("SELECT"):
         console.print("[red]Разрешены только SELECT запросы.[/red]")
         console.print('[dim]Пример: hh-apply query "SELECT * FROM applications"[/dim]')
         return
+    dangerous = ("DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "ATTACH", "DETACH")
+    for kw in dangerous:
+        if kw in sql_upper:
+            console.print(f"[red]Запрещённая операция: {kw}[/red]")
+            return
 
     with Tracker(db_path) as tracker:
         try:
