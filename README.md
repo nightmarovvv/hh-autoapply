@@ -4,29 +4,48 @@
 
 # hh-apply
 
-CLI для автоматических откликов на [hh.ru](https://hh.ru). Написан на Python, работает через браузер с антидетектом.
+**Автоматические отклики на [hh.ru](https://hh.ru) из терминала.**
 
-## Что делает
+Ищет вакансии, фильтрует, откликается через настоящий браузер с антидетектом. Вы настраиваете один раз — дальше работает само.
 
-- Ищет вакансии по заданным фильтрам (запрос, регион, зарплата, опыт, график)
-- Откликается через реальный браузер — isTrusted клики, не API
-- Персонализирует сопроводительное письмо под каждую вакансию
-- Приоритизирует свежие вакансии (сегодня → вчера → старые)
-- Вакансии с тестами сохраняет отдельно — для ручного прохождения
-- Показывает капчу прямо в терминале, если появится
-- Поднимает резюме через Android API
-- Ведёт базу данных всех откликов с экспортом в CSV/JSON
-- Мониторит ответы рекрутеров (приглашения, отказы, конверсия)
-- Автозапуск по расписанию через crontab
+---
+
+> Этот проект полностью бесплатный и open-source. Я сделал его для всех, кто устал вручную кликать «Откликнуться» на сотни вакансий. Если hh-apply вам помог — поставьте звёздочку, это лучшая мотивация продолжать развивать проект.
+
+---
+
+## Возможности
+
+- **Умный поиск** — фильтры по запросу, региону, зарплате, опыту, графику
+- **Реальный браузер** — isTrusted клики через Patchright, не API-запросы
+- **Сопроводительное письмо** — автоподстановка `{company}`, `{position}`, `{salary}`
+- **Свежие первыми** — приоритизация: сегодня > вчера > старые
+- **Тестовые вакансии** — пропускает, сохраняет ссылки для ручного прохождения
+- **Капча в терминале** — показывает картинку, вводите текст не выходя из терминала
+- **Автоподъём резюме** — boost через Android API по расписанию
+- **База данных** — все отклики в SQLite с экспортом в CSV/JSON
+- **Ответы рекрутеров** — мониторинг приглашений, отказов, конверсии
+- **Расписание** — автозапуск через crontab (ежедневно, по будням)
+- **Диагностика** — `hh-apply doctor` проверит что всё настроено
+- **Антидетект** — Patchright + fingerprint masking + человеческие паузы
+
+## Быстрый старт
+
+```bash
+hh-apply init          # Настройка (стрелки + пробел)
+hh-apply login         # Войти в hh.ru через браузер
+hh-apply run --dry-run # Посмотреть вакансии без откликов
+hh-apply run           # Запустить отклики
+```
 
 ## Установка
 
 Копируйте каждую команду и вставляйте в терминал по одной.
 
 > **Не знаете как открыть терминал?**
-> - **macOS:** нажмите **Cmd + Пробел**, введите **Terminal**, нажмите Enter
-> - **Windows:** нажмите клавишу **Win**, введите **cmd**, нажмите Enter
-> - **Linux:** нажмите **Ctrl + Alt + T**
+> - **macOS:** Cmd + Пробел → Terminal → Enter
+> - **Windows:** Win → cmd → Enter
+> - **Linux:** Ctrl + Alt + T
 
 ---
 
@@ -42,40 +61,26 @@ Windows:
 python --version
 ```
 
-Если показывает `Python 3.9` или выше — переходите к **Шагу 2**.
-
-Если пишет "не найдено" или открывается Microsoft Store:
+Нужен `Python 3.9` или выше.
 
 <details>
 <summary><b>Как установить Python</b></summary>
 
 **macOS:**
 
-Сначала установите Homebrew (менеджер пакетов). Вставьте в терминал:
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
-> Попросит пароль от Mac — это нормально. При вводе пароль не отображается — просто введите и нажмите Enter. Если в конце написано `Add Homebrew to your PATH` — выполните те команды которые он показал.
-
-Затем установите Python:
 ```bash
 brew install python
 ```
 
----
-
 **Windows:**
 
 1. Откройте [python.org/downloads](https://www.python.org/downloads/)
-2. Нажмите жёлтую кнопку **"Download Python"**
-3. Запустите скачанный файл
-4. **ВАЖНО:** на первом экране внизу есть галочка **"Add python.exe to PATH"** — **поставьте её**. Без неё ничего не будет работать
-5. Нажмите **"Install Now"**
-6. **Закройте командную строку и откройте заново**
-
-> Если забыли галочку — удалите Python через **Параметры → Приложения**, скачайте заново и поставьте.
-
----
+2. Скачайте и запустите установщик
+3. **Поставьте галочку "Add python.exe to PATH"**
+4. Install Now → закройте и откройте cmd заново
 
 **Ubuntu / Debian / WSL:**
 ```bash
@@ -86,39 +91,23 @@ sudo apt update && sudo apt install -y python3 python3-pip python3-venv
 
 ---
 
-### Шаг 2. Создайте папку и виртуальное окружение
-
-Виртуальное окружение — это изолированная песочница. Все команды (`hh-apply`, `patchright`) будут работать внутри неё без проблем с PATH.
+### Шаг 2. Создайте виртуальное окружение
 
 **macOS / Linux:**
-
 ```bash
 mkdir ~/hh-apply && cd ~/hh-apply
-```
-
-```bash
 python3 -m venv .venv
-```
-
-```bash
 source .venv/bin/activate
 ```
 
 **Windows:**
-
 ```
 mkdir %USERPROFILE%\hh-apply && cd %USERPROFILE%\hh-apply
-```
-
-```
 python -m venv .venv
-```
-
-```
 .venv\Scripts\activate
 ```
 
-> После активации в начале строки терминала появится `(.venv)` — это значит окружение включено.
+В начале строки появится `(.venv)` — окружение активно.
 
 ---
 
@@ -128,26 +117,17 @@ python -m venv .venv
 pip install git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
-> Побегут строки — это скачивание. Дождитесь `Successfully installed`.
-
 <details>
-<summary><b>Если пишет pip: command not found</b></summary>
+<summary><b>pip: command not found?</b></summary>
 
-macOS / Linux:
 ```bash
 python3 -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
 ```
 
-Windows:
-```
-python -m pip install git+https://github.com/nightmarovvv/hh-autoapply.git
-```
-
-Если и это не работает — pip не установлен:
+Если и это не работает:
 ```bash
 python3 -m ensurepip --upgrade
 ```
-И повторите установку.
 
 </details>
 
@@ -155,29 +135,25 @@ python3 -m ensurepip --upgrade
 
 ### Шаг 4. Скачайте браузер
 
-hh-apply работает через скрытый браузер Chromium. Скачайте его один раз:
-
 ```bash
 patchright install chromium
 ```
 
-> На Linux также выполните: `patchright install-deps chromium`
+> Linux: также выполните `patchright install-deps chromium`
 
 ---
 
 ### Шаг 5. Проверьте
 
 ```bash
-hh-apply --version
+hh-apply doctor
 ```
 
-Видите номер версии (например `1.1.0`)? Всё работает! Переходите к [быстрому старту](#быстрый-старт).
+Все пункты зелёные? Готово!
 
 ---
 
 ### Как запускать в следующий раз
-
-Каждый раз когда хотите запустить hh-apply — сначала активируйте окружение:
 
 **macOS / Linux:**
 ```bash
@@ -189,27 +165,10 @@ cd ~/hh-apply && source .venv/bin/activate
 cd %USERPROFILE%\hh-apply && .venv\Scripts\activate
 ```
 
-После этого `hh-apply` работает как обычно.
-
----
-
-### Обновление до последней версии
-
-Активируйте окружение (см. выше), затем:
+### Обновление
 
 ```bash
 pip install --no-cache-dir --force-reinstall git+https://github.com/nightmarovvv/hh-autoapply.git
-```
-
-> `--no-cache-dir` скачивает заново, `--force-reinstall` перезаписывает старую версию. Обычный `--upgrade` иногда не срабатывает.
-
-## Быстрый старт
-
-```bash
-hh-apply init          # Настройка (стрелки + пробел)
-hh-apply login         # Войти в hh.ru
-hh-apply run --dry-run # Пробный запуск — посмотреть вакансии
-hh-apply run           # Запустить отклики
 ```
 
 ## Команды
@@ -217,37 +176,36 @@ hh-apply run           # Запустить отклики
 | Команда | Описание |
 |---------|----------|
 | `init` | Настройка — регион, зарплата, опыт, фильтры, письмо |
-| `login` | Вход через браузер на компе (Chrome, Edge, Brave, Yandex Browser) |
+| `login` | Вход через браузер (Chrome, Edge, Brave, Yandex Browser) |
 | `run` | Запуск откликов с live-прогрессом |
-| `stats` | Статистика по откликам (цветная + по дням) |
-| `api-login` | OAuth авторизация для boost, responses, whoami |
-| `responses` | Мониторинг ответов рекрутеров (требует api-login) |
-| `schedule` | Настроить автозапуск по расписанию |
-| `boost` | Поднять резюме в поиске рекрутеров (требует api-login) |
-| `done` | Убрать тестовую вакансию из списка |
-| `whoami` | Информация об аккаунте (требует api-login) |
-| `query` | SQL-запросы к базе данных |
-| `completions` | Автодополнение для bash/zsh/fish |
+| `run --dry-run` | Посмотреть вакансии без откликов |
+| `stats` | Статистика откликов (цветная + по дням) |
+| `doctor` | Диагностика окружения |
+| `api-login` | OAuth для boost, responses, whoami |
+| `boost` | Поднять резюме в поиске рекрутеров |
+| `responses` | Мониторинг ответов рекрутеров |
+| `schedule` | Автозапуск по расписанию |
+| `done` | Убрать тестовую вакансию |
+| `whoami` | Информация об аккаунте |
+| `query` | SQL-запросы к базе |
 
 ### Опции `run`
 
 | Флаг | Описание |
 |------|----------|
-| `-c qa.yaml` | Использовать другой профиль конфига |
+| `-c qa.yaml` | Другой профиль конфига |
 | `--limit N` | Максимум откликов |
 | `--exclude "regex"` | Исключить вакансии (напр. `junior\|стажёр`) |
-| `--dry-run` | Только поиск — таблица вакансий без откликов |
+| `--dry-run` | Только показать вакансии |
 | `--headless` | Без окна браузера |
 | `--report файл` | Сохранить отчёт |
-
-Без флагов — интерактивный режим с вопросами.
 
 ### Несколько профилей
 
 ```bash
 hh-apply init -o python.yaml   # Профиль для Python
 hh-apply init -o qa.yaml       # Профиль для QA
-hh-apply run -c python.yaml    # Запуск с конкретным профилем
+hh-apply run -c python.yaml    # Запуск с профилем
 ```
 
 ### Расписание
@@ -255,49 +213,35 @@ hh-apply run -c python.yaml    # Запуск с конкретным профи
 ```bash
 hh-apply schedule set 09:00              # Каждый день в 9:00
 hh-apply schedule set 09:00 --weekdays   # Только будни
-hh-apply schedule boost 4                # Boost резюме каждые 4 часа
+hh-apply schedule boost 4                # Boost каждые 4 часа
 hh-apply schedule status                 # Текущее расписание
-hh-apply schedule remove                 # Удалить расписание
+hh-apply schedule remove                 # Удалить
 ```
 
-### Экспорт данных
+### Экспорт
 
 ```bash
-hh-apply stats --csv -o out.csv   # Экспорт в CSV
-hh-apply stats --json              # Экспорт в JSON
+hh-apply stats --csv -o out.csv
+hh-apply stats --json
 ```
 
 ## Как работает
 
-**Поиск:** Формирует URL с фильтрами → открывает в браузере → собирает вакансии со страницы → сортирует свежие первыми.
+**Поиск** — формирует URL с фильтрами, открывает в браузере, собирает вакансии, сортирует свежие первыми.
 
-**Проверка:** Для каждой вакансии API-запросом определяет тип — quickResponse (мгновенный отклик), modal (с письмом), test-required (с тестом).
+**Проверка** — для каждой вакансии API-запросом определяет тип: мгновенный отклик, модалка с письмом или тестовое задание.
 
-**Отклик:** Кликает кнопку через `page.mouse` (isTrusted: true). Обрабатывает модалки, foreign warning, чат рекрутера. При ошибке — retry с экспоненциальной задержкой.
+**Отклик** — кликает кнопку через `page.mouse` (isTrusted: true). Обрабатывает модалки, предупреждения, чат рекрутера. При ошибке — retry.
 
-**Письмо:** Подставляет `{company}`, `{position}`, `{salary}` из данных вакансии.
+**Письмо** — подставляет `{company}`, `{position}`, `{salary}` в шаблон.
 
-**Тесты:** Пропускает, сохраняет ссылку в `~/.hh-apply/test_vacancies.txt`.
+**Капча** — скриншот в терминале (Kitty/Sixel/файл), вводите текст, отправляется в браузер.
 
-**Капча:** Скриншот в терминале (Kitty protocol), ввод текста → вставка в браузер.
-
-**Прогресс:** Rich Live-дашборд — прогрессбар, счётчики, текущая вакансия.
-
-## Антидетект
-
-Используется [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) — форк Playwright с патчами на уровне Chromium:
-
-- Нет `Runtime.enable` — CDP невидим для антибот-скриптов
-- Убраны `--enable-automation`, `--disable-popup-blocking` и другие флаги
-- Canvas/Audio fingerprint noise
-- WebGL vendor/renderer spoof
-- 15+ User-Agent (Mac/Win/Linux) с реальной версией Chromium
-- navigator.webdriver = undefined
-- Playwright markers удалены
+**Антидетект** — [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) (форк Playwright с патчами Chromium) + fingerprint noise + человеческие паузы (±30% вариативность).
 
 ## Конфигурация
 
-`hh-apply init` создаёт `config.yaml` через визард со стрелочными меню.
+`hh-apply init` создаёт `config.yaml` через визард.
 
 ```yaml
 search:
@@ -310,8 +254,8 @@ search:
 filters:
   exclude_companies: ["Компания"]
   exclude_keywords: ["intern"]
-  exclude_pattern: "junior|стажёр|bitrix"     # Regex по названию
-  exclude_company_pattern: "аутсорс|крипто"   # Regex по компании
+  exclude_pattern: "junior|стажёр|bitrix"
+  exclude_company_pattern: "аутсорс|крипто"
   skip_test_vacancies: true
 
 apply:
@@ -322,119 +266,78 @@ apply:
     Меня заинтересовала вакансия {position} в {company}.
     Буду рад обсудить детали.
     С уважением
-  # Переменные: {company}, {position}, {salary}
   delay_min: 1.5
   delay_max: 4.0
 
 browser:
   headless: false
   data_dir: "~/.hh-apply"
+  # timezone: "Europe/Moscow"
+  # proxy: "http://user:pass@host:port"
 ```
-
-## Файлы данных
-
-`~/.hh-apply/`:
-- `storage_state.json` — куки браузера
-- `applications.db` — SQLite база откликов
-- `api_token.json` — токены для boost/whoami
-- `test_vacancies.txt` — вакансии с тестами
 
 ## Безопасность
 
 - Пароли не хранятся — логин через браузер, сохраняются только куки
-- Запросы с вашего устройства и IP
-- Прокси подхватывается из `HTTPS_PROXY` / `http_proxy`
+- Токены хранятся с правами `0600` (только владелец)
+- Все запросы с вашего устройства и IP
+- Прокси: `HTTPS_PROXY` / `http_proxy` или `browser.proxy` в конфиге
 
 ## Частые проблемы
 
 <details>
 <summary><b>"python" / "python3" не найден</b></summary>
 
-**macOS / Linux:** команда называется `python3`, не `python`:
-```bash
-python3 --version
-```
+**macOS / Linux:** команда `python3`, не `python`.
 
-**Windows:** если `python` открывает Microsoft Store — Python не установлен. Скачайте с [python.org/downloads](https://www.python.org/downloads/). При установке **обязательно поставьте галочку "Add python.exe to PATH"**. Потом **перезапустите командную строку**.
-
-Если забыли галочку — удалите Python через **Параметры → Приложения**, скачайте заново и поставьте.
+**Windows:** если `python` открывает Microsoft Store — установите Python с [python.org](https://www.python.org/downloads/). Галочка **"Add to PATH"** обязательна.
 
 </details>
 
 <details>
-<summary><b>"hh-apply" не найдена / не является командой</b></summary>
+<summary><b>"hh-apply" не найдена</b></summary>
 
-Скорее всего вы не активировали виртуальное окружение. Перед запуском выполните:
+Не активировано окружение:
 
-**macOS / Linux:**
-```bash
-cd ~/hh-apply && source .venv/bin/activate
-```
+**macOS / Linux:** `cd ~/hh-apply && source .venv/bin/activate`
 
-**Windows:**
-```
-cd %USERPROFILE%\hh-apply && .venv\Scripts\activate
-```
-
-В начале строки должно появиться `(.venv)`. После этого `hh-apply` будет работать.
-
-Если папки `~/hh-apply` нет — вернитесь к [Шагу 2 установки](#шаг-2-создайте-папку-и-виртуальное-окружение).
+**Windows:** `cd %USERPROFILE%\hh-apply && .venv\Scripts\activate`
 
 </details>
 
 <details>
 <summary><b>Бесконечная загрузка при логине</b></summary>
 
-Если после ввода номера телефона страница зависает и не переходит к вводу кода — обновите hh-apply:
-
-```bash
-pip install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git
-```
-
-В новой версии логин использует антидетект-браузер, который не блокируется hh.ru.
+Обновите: `pip install --upgrade git+https://github.com/nightmarovvv/hh-autoapply.git`
 
 </details>
 
 <details>
-<summary><b>Капча при первом запуске</b></summary>
+<summary><b>Капча</b></summary>
 
-hh.ru иногда показывает капчу новым посетителям. hh-apply покажет её в терминале — введите текст и продолжайте. Если появляется слишком часто — подождите 10-15 минут и попробуйте снова.
-
-</details>
-
-<details>
-<summary><b>"Не авторизован" при запуске</b></summary>
-
-Куки hh.ru живут около 2 недель. Перелогиньтесь:
-
-```bash
-hh-apply login
-```
+hh.ru иногда показывает капчу. hh-apply покажет её в терминале — введите текст. Если часто — подождите 10-15 минут.
 
 </details>
 
 <details>
-<summary><b>Кракозябры / UnicodeDecodeError (Windows)</b></summary>
+<summary><b>"Не авторизован"</b></summary>
 
-Установите [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) из Microsoft Store — он поддерживает русские символы из коробки.
-
-Или выполните перед запуском:
-```
-chcp 65001
-```
+Куки живут ~2 недели. Перелогиньтесь: `hh-apply login`
 
 </details>
 
 <details>
-<summary><b>Ошибка при установке Chromium на Linux</b></summary>
+<summary><b>Кракозябры на Windows</b></summary>
 
-Нужны системные зависимости:
+Установите [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) или выполните `chcp 65001`.
+
+</details>
+
+<details>
+<summary><b>Chromium не ставится на Linux</b></summary>
+
 ```bash
 patchright install-deps chromium
-```
-
-Затем повторите:
-```bash
 patchright install chromium
 ```
 
@@ -444,24 +347,17 @@ patchright install chromium
 
 ```bash
 git clone https://github.com/nightmarovvv/hh-autoapply.git
-```
-
-```bash
 cd hh-autoapply
+pip install -e ".[dev]"
+pytest tests/ -v
 ```
 
-```bash
-python3 -m pip install -e ".[dev]"
-```
-
-```bash
-python3 -m pytest tests/ -v
-```
+Подробнее — в [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Требования
 
 - Python 3.9+
-- Linux, macOS, Windows, WSL
+- macOS, Linux, Windows, WSL
 
 ## Лицензия
 
