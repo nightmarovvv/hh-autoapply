@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from patchright.sync_api import Page
 
 from hh_apply.filters import build_search_url
+from hh_apply.stealth import human_wait
 
 
 @dataclass
@@ -30,7 +31,7 @@ def do_search(page: Page, config: dict) -> None:
     # Формируем URL с фильтрами
     search_url = build_search_url(search_config)
     page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-    page.wait_for_timeout(3000)
+    human_wait(page, 3000)
 
     _dismiss_cookies(page)
 
@@ -138,7 +139,7 @@ def go_next_page(page: Page) -> bool:
         return False
 
     page.goto(next_url, wait_until="domcontentloaded", timeout=20000)
-    page.wait_for_timeout(3000)
+    human_wait(page, 3000)
     return True
 
 
@@ -162,4 +163,4 @@ def _dismiss_cookies(page: Page) -> None:
             btn.first.click(timeout=3000)
         except Exception:
             page.evaluate('document.querySelector(\'[data-qa="cookies-policy-informer"]\')?.remove()')
-        page.wait_for_timeout(500)
+        human_wait(page, 500)
