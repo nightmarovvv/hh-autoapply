@@ -85,21 +85,17 @@ class TestRenderCoverLetter:
         result = render_cover_letter("Вакансия: {position}", self._vac())
         assert result == "Вакансия: Python Dev"
 
-    def test_salary_substitution(self):
+    def test_salary_placeholder_ignored(self):
+        """Плейсхолдер {salary} больше не подставляется — остаётся как есть."""
         result = render_cover_letter("ЗП: {salary}", self._vac())
-        assert result == "ЗП: 200000 руб"
-
-    def test_salary_none(self):
-        v = self._vac(salary=None)
-        result = render_cover_letter("ЗП: {salary}", v)
-        assert result == "ЗП: не указана"
+        assert result == "ЗП: {salary}"
 
     def test_all_variables(self):
         result = render_cover_letter(
-            "{position} в {company}, ЗП {salary}",
+            "{position} в {company}",
             self._vac(),
         )
-        assert result == "Python Dev в Yandex, ЗП 200000 руб"
+        assert result == "Python Dev в Yandex"
 
     def test_no_variables(self):
         result = render_cover_letter("Простое письмо", self._vac())

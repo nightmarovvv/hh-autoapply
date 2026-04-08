@@ -10,6 +10,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from hh_apply.constants import SUCCESS_STATUSES
+
 
 @dataclass
 class SessionResult:
@@ -38,7 +40,7 @@ class SessionReport:
 
     @property
     def sent(self) -> int:
-        return sum(1 for r in self.results if r.status in ("sent", "cover_letter_sent", "letter_sent"))
+        return sum(1 for r in self.results if r.status in SUCCESS_STATUSES)
 
     @property
     def cover_letter_sent(self) -> int:
@@ -63,6 +65,10 @@ class SessionReport:
     @property
     def filtered(self) -> int:
         return sum(1 for r in self.results if r.status == "filtered")
+
+    @property
+    def total(self) -> int:
+        return len(self.results)
 
     @property
     def elapsed(self) -> float:

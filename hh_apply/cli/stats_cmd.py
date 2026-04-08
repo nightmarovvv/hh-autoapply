@@ -109,6 +109,14 @@ def stats(config, csv_export, json_export, output):
                 )
             console.print(day_table)
 
+            # Bar chart по дням
+            max_sent = max(d["sent"] for d in daily) or 1
+            console.print()
+            for d in daily:
+                bar_len = int(d["sent"] / max_sent * 25)
+                bar = f"[green]{'█' * bar_len}[/green]{'░' * (25 - bar_len)}"
+                console.print(f"  {d['date']}  {bar}  {d['sent']}")
+
 
 @main.command(epilog="""
 Примеры:

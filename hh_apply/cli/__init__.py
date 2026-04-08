@@ -45,9 +45,14 @@ class RichHelpGroup(click.Group):
 
 @click.group(cls=RichHelpGroup, invoke_without_command=True)
 @click.version_option(__version__, prog_name="hh-apply")
+@click.option("-v", "--verbose", is_flag=True, help="Подробный вывод (debug)")
+@click.option("-q", "--quiet", is_flag=True, help="Тихий режим (для cron)")
 @click.pass_context
-def main(ctx):
+def main(ctx, verbose, quiet):
     """hh-apply — массовые автоматические отклики на вакансии hh.ru"""
+    ctx.ensure_object(dict)
+    ctx.obj["verbose"] = verbose
+    ctx.obj["quiet"] = quiet
     if ctx.invoked_subcommand is None:
         Console().print(WELCOME_TEXT)
 

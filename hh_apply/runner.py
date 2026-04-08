@@ -46,6 +46,7 @@ LOG_ICONS = {
     "error": "\u274c",               # ❌
     "no_button": "\u23e9",
     "captcha": "\u26a0\ufe0f",       # ⚠️
+    "rate_limited": "\u26d4",        # ⛔
 }
 
 STATUS_COLORS = {
@@ -59,6 +60,7 @@ STATUS_COLORS = {
     "error": "red",
     "no_button": "dim",
     "captcha": "yellow",
+    "rate_limited": "red bold",
 }
 
 STATUS_LABELS = {
@@ -72,6 +74,7 @@ STATUS_LABELS = {
     "error": "Ошибка",
     "no_button": "Нет кнопки",
     "captcha": "Капча",
+    "rate_limited": "Rate limit",
 }
 
 
@@ -89,6 +92,7 @@ class LiveProgress:
         self.current_company = ""
         self.log_lines: list[Text] = []
         self.max_log_lines = 12
+        self.start_time = time.time()
 
     def build_display(self) -> Panel:
         # Счётчики
@@ -97,8 +101,20 @@ class LiveProgress:
         bar_filled = int(pct / 100 * 30)
         bar = f"[green]{'█' * bar_filled}[/green][dim]{'░' * (30 - bar_filled)}[/dim]"
 
+        # ETA
+        elapsed = time.time() - self.start_time
+        total_processed = self.sent + self.tests + self.skipped + self.errors
+        eta_str = ""
+        if total_processed > 0 and self.sent < self.max_apps:
+            avg_per_item = elapsed / total_processed
+            remaining_items = self.max_apps - self.sent
+            eta_seconds = avg_per_item * remaining_items
+            eta_min = int(eta_seconds // 60)
+            eta_sec = int(eta_seconds % 60)
+            eta_str = f"  [dim]ETA: ~{eta_min} мин {eta_sec} сек[/dim]"
+
         header = (
-            f"  {bar}  [bold green]{self.sent}[/bold green]/{self.max_apps}\n"
+            f"  {bar}  [bold green]{self.sent}[/bold green]/{self.max_apps}{eta_str}\n"
             f"\n"
             f"  [green]Отправлено: {self.sent}[/green]  "
             f"[yellow]Тесты: {self.tests}[/yellow]  "
@@ -131,7 +147,7 @@ class LiveProgress:
             self.sent += 1
         elif status == "test_required":
             self.tests += 1
-        elif status == "error":
+        elif status in ("error", "rate_limited"):
             self.errors += 1
         elif status in ("filtered", "already_applied", "extra_steps", "no_button"):
             self.skipped += 1
@@ -247,6 +263,7 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                 page_num = 0
                 max_pages = 30
                 limit_exceeded = False
+                consecutive_rate_limits = 0
 
                 # Dry-run: собираем все вакансии в таблицу
                 if dry_run:
@@ -343,6 +360,21 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                             _dismiss_popups(page)
 
                             status = _retry_apply(page, vacancy, cover_letter, use_cover_letter, skip_foreign)
+
+                            # Circuit breaker: 3 rate limit подряд → пауза 5 мин
+                            if status == "rate_limited":
+                                consecutive_rate_limits += 1
+                                if consecutive_rate_limits >= 3:
+                                    progress.log_lines.append(Text.from_markup(
+                                        "[red bold]3 rate-limit подряд — пауза 5 мин[/red bold]"
+                                    ))
+                                    live.update(progress.build_display())
+                                    time.sleep(300)
+                                    consecutive_rate_limits = 0
+                                    continue
+                            else:
+                                consecutive_rate_limits = 0
+
                             tracker.record(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
                             report.add(vacancy.vacancy_id, vacancy.title, vacancy.company, status)
                             progress.log(status, vacancy)
@@ -411,7 +443,7 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
 
     console.print("\n[dim]Совет: hh-apply stats — посмотреть общую статистику[/dim]")
 
-    logger.info("Сессия завершена: sent=%d, total=%d", report.sent_count, report.total)
+    logger.info("Сессия завершена: sent=%d, total=%d", report.sent, report.total)
 
 
 def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages):
@@ -471,12 +503,24 @@ def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages
     table.add_column("Зарплата", style="green", max_width=25)
     table.add_column("Дата", style="dim", max_width=12)
 
+    salary_from = config.get("search", {}).get("salary_from")
+
     for i, v in enumerate(all_vacancies, 1):
+        # Цветная зарплата
+        salary_display = v.salary or "[dim]—[/dim]"
+        if v.salary and salary_from:
+            try:
+                num = int("".join(c for c in v.salary if c.isdigit()))
+                if num >= salary_from:
+                    salary_display = f"[bold green]{v.salary}[/bold green]"
+            except (ValueError, TypeError):
+                pass
+
         table.add_row(
             str(i),
             v.title[:50],
             v.company[:25],
-            v.salary or "[dim]—[/dim]",
+            salary_display,
             v.published_date or "[dim]—[/dim]",
         )
 
@@ -497,5 +541,56 @@ def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages
 
     console.print(f"\n[green]Найдено {len(all_vacancies)} вакансий для отклика.[/green]")
     console.print("\n[dim]Это пробный режим — отклики НЕ отправлены.[/dim]")
-    console.print("[dim]Запустите [bold]hh-apply run[/bold] чтобы откликнуться на эти вакансии.[/dim]")
-    console.print("[dim]Хотите изменить фильтры? Отредактируйте config.yaml или запустите [bold]hh-apply init[/bold][/dim]")
+
+    # Интерактивный выбор
+    proceed = inquirer.confirm(
+        message="Откликнуться на выбранные вакансии?",
+        default=False,
+    ).execute()
+
+    if not proceed:
+        console.print("[dim]Запустите [bold]hh-apply run[/bold] чтобы откликнуться на все вакансии.[/dim]")
+        return
+
+    choices = [f"{i}. {v.title[:45]} — {v.company[:20]}" for i, v in enumerate(all_vacancies, 1)]
+    selected = inquirer.checkbox(
+        message="Выберите вакансии (пробел — отметить, Enter — подтвердить):",
+        choices=choices,
+    ).execute()
+
+    if not selected:
+        console.print("[dim]Ничего не выбрано.[/dim]")
+        return
+
+    selected_indices = set()
+    for s in selected:
+        try:
+            idx = int(s.split(".")[0]) - 1
+            selected_indices.add(idx)
+        except (ValueError, IndexError):
+            pass
+
+    selected_vacancies = [v for i, v in enumerate(all_vacancies) if i in selected_indices]
+    console.print(f"\n[bold]Откликаюсь на {len(selected_vacancies)} вакансий...[/bold]")
+
+    from hh_apply.apply import apply_to_vacancy, human_delay
+    apply_config = config.get("apply", {})
+    use_cover_letter = apply_config.get("use_cover_letter", True)
+    cover_letter = apply_config.get("cover_letter", "").strip() if use_cover_letter else ""
+    skip_foreign = config.get("filters", {}).get("skip_foreign", False)
+    delay_min = apply_config.get("delay_min", 1.5)
+    delay_max = apply_config.get("delay_max", 4.0)
+
+    sent = 0
+    for v in selected_vacancies:
+        status = apply_to_vacancy(page, v, cover_letter, use_cover_letter, skip_foreign)
+        tracker.record(v.vacancy_id, v.title, v.company, status)
+        icon = LOG_ICONS.get(status, "")
+        color = STATUS_COLORS.get(status, "white")
+        label = STATUS_LABELS.get(status, status)
+        console.print(f"  {icon} [{color}]{label}[/{color}] {v.title[:45]} — {v.company[:20]}")
+        if status in ("sent", "cover_letter_sent"):
+            sent += 1
+        human_delay(delay_min, delay_max)
+
+    console.print(f"\n[green]Отправлено: {sent}/{len(selected_vacancies)}[/green]")

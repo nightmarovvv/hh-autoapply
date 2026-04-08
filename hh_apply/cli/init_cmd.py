@@ -269,8 +269,21 @@ def init(output):
     if schedule:
         config["search"]["schedule"] = schedule
 
+    # Preview перед сохранением
+    console.print()
+    config_yaml = yaml.dump(config, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    console.print(Panel(config_yaml.rstrip(), title="[bold]Предпросмотр конфига[/bold]", border_style="yellow"))
+
+    save = inquirer.confirm(
+        message="Сохранить конфиг?",
+        default=True,
+    ).execute()
+    if not save:
+        console.print("[dim]Отменено.[/dim]")
+        return
+
     with open(target, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        f.write(config_yaml)
 
     console.print()
     console.print(Panel(

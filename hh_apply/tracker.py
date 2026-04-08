@@ -14,8 +14,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-
-SUCCESS_STATUSES = ("sent", "cover_letter_sent", "letter_sent")
+from hh_apply.constants import SUCCESS_STATUSES
 
 
 class Tracker:
@@ -105,6 +104,14 @@ class Tracker:
         return row is not None
 
     def record(self, vacancy_id: str, title: str, company: str, status: str):
+        # Не перезаписывать успешный статус менее успешным
+        if status not in SUCCESS_STATUSES:
+            existing = self.conn.execute(
+                "SELECT status FROM applications WHERE vacancy_id = ?",
+                (vacancy_id,),
+            ).fetchone()
+            if existing and existing[0] in SUCCESS_STATUSES:
+                return
         self.conn.execute(
             """INSERT OR REPLACE INTO applications
                (vacancy_id, title, company, status, applied_at)
@@ -200,7 +207,7 @@ class Tracker:
                VALUES (?, ?, ?, ?, ?, ?)""",
             (vacancy_id, title, company, url, reason, datetime.now().isoformat()),
         )
-        self.conn.commit()
+        # Не коммитим каждый раз — flush при close() или следующем record()
 
     def get_skipped(self, reason: "str | None" = None) -> list[dict]:
         if reason:
@@ -255,11 +262,19 @@ class Tracker:
     # === Raw SQL ===
 
     def execute_query(self, sql: str) -> tuple:
-        """Выполняет произвольный SQL. Возвращает (columns, rows)."""
-        cursor = self.conn.execute(sql)
+        """Выполняет SQL-запрос (только SELECT). Возвращает (columns, rows)."""
+        sql_stripped = sql.strip()
+        if not sql_stripped.upper().startswith("SELECT"):
+            raise ValueError("Разрешены только SELECT-запросы. "
+                             "Для изменения данных используйте команды hh-apply.")
+        cursor = self.conn.execute(sql_stripped)
         columns = [d[0] for d in cursor.description] if cursor.description else []
         rows = cursor.fetchall()
         return columns, rows
 
     def close(self):
+        try:
+            self.conn.commit()
+        except Exception:
+            pass
         self.conn.close()

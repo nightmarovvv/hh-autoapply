@@ -46,7 +46,6 @@ DEFAULTS = {
 COVER_LETTER_VARS = {
     "{company}": "Название компании",
     "{position}": "Название вакансии",
-    "{salary}": "Зарплата (если указана)",
 }
 
 
@@ -147,12 +146,10 @@ def _validate_config(config: dict) -> None:
 
 
 def render_cover_letter(template: str, vacancy) -> str:
-    """Подставляет переменные {company}, {position}, {salary} в шаблон письма."""
+    """Подставляет переменные {company}, {position} в шаблон письма."""
     text = template
     text = text.replace("{company}", getattr(vacancy, "company", "") or "")
     text = text.replace("{position}", getattr(vacancy, "title", "") or "")
-    salary = getattr(vacancy, "salary", None)
-    text = text.replace("{salary}", salary if salary else "не указана")
     return text
 
 

@@ -55,9 +55,6 @@ class HHApiClient:
         self._last_request_time = 0.0
         self._load_token()
 
-        # Подавляем InsecureRequestWarning
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def _load_token(self):
         if self.token_path.exists():

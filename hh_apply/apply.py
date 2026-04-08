@@ -17,19 +17,29 @@ from hh_apply.search import Vacancy
 from hh_apply.captcha import solve_captcha_interactive, _check_captcha_present
 from hh_apply.stealth import human_mouse_move, human_wait
 from hh_apply.config import render_cover_letter
+from hh_apply.constants import (
+    STATUS_SENT, STATUS_COVER_LETTER, STATUS_TEST_REQUIRED,
+    STATUS_EXTRA_STEPS, STATUS_LETTER_REQUIRED, STATUS_ALREADY_APPLIED,
+    STATUS_NO_BUTTON, STATUS_CAPTCHA, STATUS_ERROR, STATUS_FILTERED,
+    STATUS_RATE_LIMITED,
+)
 
 logger = logging.getLogger("hh_apply.apply")
 
-STATUS_SENT = "sent"
-STATUS_COVER_LETTER = "cover_letter_sent"
-STATUS_TEST_REQUIRED = "test_required"
-STATUS_EXTRA_STEPS = "extra_steps"
-STATUS_LETTER_REQUIRED = "letter_required"
-STATUS_ALREADY_APPLIED = "already_applied"
-STATUS_NO_BUTTON = "no_button"
-STATUS_CAPTCHA = "captcha"
-STATUS_ERROR = "error"
-STATUS_FILTERED = "filtered"
+
+def _card_js(vacancy_id: str, action: str) -> str:
+    """Генерирует JS для поиска карточки вакансии по ID и выполнения действия."""
+    return f"""
+    () => {{
+        const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
+        for (const card of cards) {{
+            const link = card.querySelector('[data-qa="serp-item__title"]');
+            if (!link || !link.href.includes('/vacancy/{vacancy_id}')) continue;
+            {action}
+        }}
+        return null;
+    }}
+    """
 
 
 def apply_to_vacancy(page: Page, vacancy: Vacancy,
@@ -38,26 +48,17 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
     """Откликается на вакансию по vacancy_id."""
     try:
         original_url = page.url
+        original_timeout = page.context.timeout if hasattr(page.context, 'timeout') else 30000
+        page.set_default_timeout(15000)
 
         try:
-            btn_info = page.evaluate(f"""
-            () => {{
-                const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
-                for (const card of cards) {{
-                    const link = card.querySelector('[data-qa="serp-item__title"]');
-                    if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
-
-                    const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                    if (!btn) return {{status: 'no_button'}};
-
-                    const text = btn.textContent.trim().toLowerCase();
-                    if (text.includes('отправлен')) return {{status: 'already_applied'}};
-
-                    return {{status: 'ready', text: btn.textContent.trim()}};
-                }}
-                return {{status: 'not_found'}};
-            }}
-        """)
+            btn_info = page.evaluate(_card_js(vacancy.vacancy_id, """
+                const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                if (!btn) return {status: 'no_button'};
+                const text = btn.textContent.trim().toLowerCase();
+                if (text.includes('отправлен')) return {status: 'already_applied'};
+                return {status: 'ready', text: btn.textContent.trim()};
+            """)) or {"status": "not_found"}
         except Exception as e:
             logger.warning("evaluate failed для %s: %s", vacancy.vacancy_id, e)
             return STATUS_ERROR
@@ -79,53 +80,27 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
             human_wait(page, random.randint(300, 800))
 
         # Скроллим к карточке
-        page.evaluate(f"""
-            () => {{
-                const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
-                for (const card of cards) {{
-                    const link = card.querySelector('[data-qa="serp-item__title"]');
-                    if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
-                    card.scrollIntoView({{block: 'center', behavior: 'smooth'}});
-                    return;
-                }}
-            }}
-        """)
+        page.evaluate(_card_js(vacancy.vacancy_id, """
+            card.scrollIntoView({block: 'center', behavior: 'smooth'});
+            return true;
+        """))
         human_wait(page, 600)
 
         # Получаем координаты после скролла
-        box = page.evaluate(f"""
-            () => {{
-                const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
-                for (const card of cards) {{
-                    const link = card.querySelector('[data-qa="serp-item__title"]');
-                    if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
-                    const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                    if (!btn) return null;
-                    const rect = btn.getBoundingClientRect();
-                    return {{x: rect.x, y: rect.y, w: rect.width, h: rect.height}};
-                }}
-                return null;
-            }}
-        """)
+        box = page.evaluate(_card_js(vacancy.vacancy_id, """
+            const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+            if (!btn) return null;
+            const rect = btn.getBoundingClientRect();
+            return {x: rect.x, y: rect.y, w: rect.width, h: rect.height};
+        """))
 
         if box and box.get("w", 0) > 0:
             # Убираем href чтобы клик не переходил на страницу вакансии
-            # + убираем target="_blank" чтобы не открывал в новой вкладке
-            page.evaluate(f"""
-                () => {{
-                    const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
-                    for (const card of cards) {{
-                        const link = card.querySelector('[data-qa="serp-item__title"]');
-                        if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
-                        const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                        if (btn) {{
-                            btn.removeAttribute('href');
-                            btn.removeAttribute('target');
-                        }}
-                        return;
-                    }}
-                }}
-            """)
+            page.evaluate(_card_js(vacancy.vacancy_id, """
+                const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                if (btn) { btn.removeAttribute('href'); btn.removeAttribute('target'); }
+                return true;
+            """))
             # Кликаем точно по центру кнопки с минимальным jitter (±3px)
             cx = box["x"] + box["w"] / 2 + random.uniform(-3, 3)
             cy = box["y"] + box["h"] / 2 + random.uniform(-2, 2)
@@ -134,22 +109,11 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
             page.mouse.click(cx, cy)
         else:
             # Fallback — JS click напрямую по кнопке
-            page.evaluate(f"""
-                () => {{
-                    const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
-                    for (const card of cards) {{
-                        const link = card.querySelector('[data-qa="serp-item__title"]');
-                        if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
-                        const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                        if (btn) {{
-                            btn.removeAttribute('href');
-                            btn.removeAttribute('target');
-                            btn.click();
-                        }}
-                        return;
-                    }}
-                }}
-            """)
+            page.evaluate(_card_js(vacancy.vacancy_id, """
+                const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                if (btn) { btn.removeAttribute('href'); btn.removeAttribute('target'); btn.click(); }
+                return true;
+            """))
 
         human_wait(page, 3000)
 
@@ -162,7 +126,7 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
         # Проверяем rate-limit
         if _check_rate_limit(page):
             logger.warning("Rate limit detected для %s", vacancy.vacancy_id)
-            return STATUS_ERROR
+            return STATUS_RATE_LIMITED
 
         # Если нас перекинуло куда-то — разбираемся
         if page.url != original_url:
@@ -240,19 +204,10 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                     else:
                         return _submit_modal(page, vacancy)
 
-                btn_after = page.evaluate(f"""
-                    () => {{
-                        const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
-                        for (const card of cards) {{
-                            const link = card.querySelector('[data-qa="serp-item__title"]');
-                            if (link && link.href.includes('/vacancy/{vacancy.vacancy_id}')) {{
-                                const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                                return btn ? btn.textContent.trim() : 'gone';
-                            }}
-                        }}
-                        return 'not_found';
-                    }}
-                """)
+                btn_after = page.evaluate(_card_js(vacancy.vacancy_id, """
+                    const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+                    return btn ? btn.textContent.trim() : 'gone';
+                """)) or "not_found"
                 if "отправлен" in btn_after.lower() or btn_after == "gone":
                     return STATUS_SENT
 
@@ -266,18 +221,10 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
         if _check_sent(page):
             return STATUS_SENT
 
-        new_text = page.evaluate(f"""
-            () => {{
-                const cards = document.querySelectorAll('[data-qa="vacancy-serp__vacancy"]');
-                for (const card of cards) {{
-                    const link = card.querySelector('[data-qa="serp-item__title"]');
-                    if (!link || !link.href.includes('/vacancy/{vacancy.vacancy_id}')) continue;
-                    const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
-                    return btn ? btn.textContent.trim() : 'gone';
-                }}
-                return 'not_found';
-            }}
-        """)
+        new_text = page.evaluate(_card_js(vacancy.vacancy_id, """
+            const btn = card.querySelector('[data-qa="vacancy-serp__vacancy_response"]');
+            return btn ? btn.textContent.trim() : 'gone';
+        """)) or "not_found"
 
         if "отправлен" in str(new_text).lower() or new_text == "gone":
             return STATUS_SENT
@@ -287,6 +234,11 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
     except Exception as e:
         logger.error("Ошибка отклика на %s: %s", vacancy.vacancy_id, e, exc_info=True)
         return STATUS_ERROR
+    finally:
+        try:
+            page.set_default_timeout(30000)
+        except Exception:
+            pass
 
 
 def _handle_redirect(page: Page, vacancy: Vacancy, original_url: str) -> str:
@@ -451,9 +403,12 @@ def _close_extra_tabs(page) -> None:
         pages = page.context.pages
         for p in pages:
             if p != page:
-                p.close()
-    except Exception:
-        pass
+                try:
+                    p.close()
+                except Exception as e:
+                    logger.debug("Не удалось закрыть вкладку: %s", e)
+    except Exception as e:
+        logger.debug("Ошибка при закрытии вкладок: %s", e)
 
 
 def _dismiss_popups(page) -> None:

@@ -227,52 +227,88 @@ def responses(config):
 
 
 def _show_responses(client, console: Console) -> None:
-    """Загружает и показывает ответы рекрутеров через API."""
-    # Получаем список negotiations по статусам
+    """Загружает и показывает ответы рекрутеров с воронкой конверсии."""
     statuses = {
-        "Приглашения": "invitation",
-        "Отказы": "discard",
-        "Ответы": "response",
+        "invitation": "Приглашения",
+        "discard": "Отказы",
+        "response": "Ответы",
     }
 
     total_apps = 0
     total_invitations = 0
     total_discards = 0
+    total_responses = 0
 
-    results = {}
-
-    for label, status in statuses.items():
+    # Считаем по статусам
+    for status, label in statuses.items():
         try:
             resp = client.get(f"/negotiations?status={status}&per_page=0")
             count = resp.get("found", 0)
-            results[label] = count
             if status == "invitation":
                 total_invitations = count
             elif status == "discard":
                 total_discards = count
+            elif status == "response":
+                total_responses = count
         except Exception:
-            results[label] = "?"
+            pass
 
-    # Общее количество откликов
+    # Общее количество
     try:
         resp = client.get("/negotiations?per_page=0")
         total_apps = resp.get("found", 0)
     except Exception:
         total_apps = 0
 
-    # Красивая таблица
-    table = Table(title="Ответы рекрутеров", border_style="blue")
+    # Без ответа = total - invitations - discards - responses
+    no_response = max(0, total_apps - total_invitations - total_discards - total_responses)
+
+    # Воронка конверсии
+    console.print()
+    console.print("[bold]Воронка откликов[/bold]\n")
+
+    funnel_items = [
+        ("Отправлено", total_apps, "blue"),
+        ("Без ответа", no_response, "dim"),
+        ("Ответы", total_responses, "yellow"),
+        ("Приглашения", total_invitations, "green"),
+        ("Отказы", total_discards, "red"),
+    ]
+
+    max_count = max(total_apps, 1)
+    for label, count, color in funnel_items:
+        bar_len = int(count / max_count * 30)
+        pct = count / max(total_apps, 1) * 100
+        bar = f"[{color}]{'█' * bar_len}[/{color}]{'░' * (30 - bar_len)}"
+        console.print(f"  {label:<15} {bar}  [{color}]{count}[/{color}] ({pct:.0f}%)")
+
+    # Таблица с деталями
+    console.print()
+    table = Table(title="Статистика ответов", border_style="blue")
     table.add_column("Метрика", style="bold")
     table.add_column("Кол-во", justify="right")
+    table.add_column("% от откликов", justify="right")
 
-    table.add_row("[bold]Всего откликов[/bold]", str(total_apps))
-    table.add_row("[green]Приглашения[/green]", str(results.get("Приглашения", "?")))
-    table.add_row("[red]Отказы[/red]", str(results.get("Отказы", "?")))
-    table.add_row("[yellow]Ответы[/yellow]", str(results.get("Ответы", "?")))
+    table.add_row("[bold]Всего откликов[/bold]", str(total_apps), "100%")
+    if total_apps > 0:
+        table.add_row("[green]Приглашения[/green]", str(total_invitations),
+                      f"[green]{total_invitations / total_apps * 100:.1f}%[/green]")
+        table.add_row("[red]Отказы[/red]", str(total_discards),
+                      f"[red]{total_discards / total_apps * 100:.1f}%[/red]")
+        table.add_row("[yellow]Ответы[/yellow]", str(total_responses),
+                      f"[yellow]{total_responses / total_apps * 100:.1f}%[/yellow]")
+        table.add_row("[dim]Без ответа[/dim]", str(no_response),
+                      f"[dim]{no_response / total_apps * 100:.1f}%[/dim]")
+    else:
+        table.add_row("[green]Приглашения[/green]", str(total_invitations), "—")
+        table.add_row("[red]Отказы[/red]", str(total_discards), "—")
+        table.add_row("[yellow]Ответы[/yellow]", str(total_responses), "—")
 
     console.print(table)
 
-    # Конверсия
-    if total_apps > 0 and isinstance(total_invitations, int):
+    # Итоговая конверсия
+    if total_apps > 0 and total_invitations > 0:
         rate = total_invitations / total_apps * 100
-        console.print(f"\n[dim]Конверсия: {rate:.1f}% приглашений из {total_apps} откликов[/dim]")
+        console.print(f"\n[bold green]Конверсия в приглашения: {rate:.1f}%[/bold green]")
+    elif total_apps > 0:
+        console.print("\n[dim]Приглашений пока нет. Продолжайте откликаться![/dim]")
