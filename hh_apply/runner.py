@@ -184,7 +184,8 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
     db_path = get_db_path(config)
 
     console.print()
-    console.print("[bold blue]hh-apply[/bold blue] v1.0.0")
+    from hh_apply import __version__
+    console.print(f"[bold blue]hh-apply[/bold blue] v{__version__}")
     console.print(f"  Запрос:    [bold]{search_config.get('query', '')}[/bold]")
     console.print(f"  Лимит:     {max_apps}")
     console.print(f"  Режим:     {'DRY RUN' if dry_run else 'БОЕВОЙ'}")
