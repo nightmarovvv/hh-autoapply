@@ -15,7 +15,10 @@ from pathlib import Path
 from threading import Lock
 from urllib.parse import urlencode, urljoin
 
+import logging
 import requests
+
+logger = logging.getLogger("hh_apply.api")
 
 # Ключи из APK hh.ru Android
 ANDROID_CLIENT_ID = "HIOMIAS39CA9DICTA7JIO64LQKQJF5AGIK74G9ITJKLNEDAOH5FHS5G1JI7FOEGD"
@@ -151,10 +154,12 @@ class HHApiClient:
                 **kwargs,
             )
             self._last_request_time = time.monotonic()
+            logger.debug("API %s %s → %d", method, endpoint, resp.status_code)
 
         # Авто-рефреш при 403
         if resp.status_code == 403 and self.is_expired and self.refresh_token:
             self.do_refresh_token()
+            logger.info("Token refreshed")
             with self._lock:
                 resp = self.session.request(
                     method, url,
