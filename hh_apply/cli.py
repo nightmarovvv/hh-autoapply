@@ -67,6 +67,7 @@ WELCOME_TEXT = f"""[bold blue]
   hh-apply schedule      Настроить автозапуск
   hh-apply done          Убрать тестовую вакансию
   hh-apply query         SQL-запросы к базе
+  hh-apply doctor        Диагностика окружения
   hh-apply completions   Автодополнение для shell
 
 [dim]Подробнее: hh-apply <команда> --help[/dim]"""
@@ -1149,6 +1150,105 @@ def completions(shell):
         # Fallback: генерируем через Click напрямую
         env_var = f"_HH_APPLY_COMPLETE={shell}_source"
         Console().print(f"[dim]Выполните: {env_var} hh-apply[/dim]")
+
+
+
+# ==================== DOCTOR ====================
+
+@main.command()
+@click.option("-c", "--config", "config_path", default="config.yaml", help="Путь к конфигу")
+def doctor(config_path):
+    """Диагностика окружения — проверяет всё ли готово к запуску."""
+    import sys
+    import shutil
+    from pathlib import Path
+    from rich.console import Console
+
+    console = Console()
+    console.print("\n[bold blue]hh-apply doctor[/bold blue]\n")
+
+    ok_count = 0
+    total = 6
+
+    # 1. Python
+    v = sys.version_info
+    if v >= (3, 9):
+        console.print(f"  [green]\u2713[/green] Python {v.major}.{v.minor}.{v.micro}")
+        ok_count += 1
+    else:
+        console.print(f"  [red]\u2717[/red] Python {v.major}.{v.minor} — нужен 3.9+")
+
+    # 2. Patchright
+    try:
+        import patchright
+        console.print(f"  [green]\u2713[/green] Patchright установлен")
+        ok_count += 1
+    except ImportError:
+        console.print("  [red]\u2717[/red] Patchright не установлен: pip install patchright")
+
+    # 3. Chromium
+    chromium_found = False
+    try:
+        from patchright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            browser.close()
+            chromium_found = True
+    except Exception:
+        pass
+
+    if chromium_found:
+        console.print("  [green]\u2713[/green] Chromium доступен")
+        ok_count += 1
+    else:
+        console.print("  [red]\u2717[/red] Chromium не найден: patchright install chromium")
+
+    # 4. Config
+    config_file = Path(config_path)
+    if config_file.exists():
+        try:
+            from hh_apply.config import load_config
+            load_config(str(config_file))
+            console.print(f"  [green]\u2713[/green] Конфиг {config_path}")
+            ok_count += 1
+        except Exception as e:
+            console.print(f"  [red]\u2717[/red] Конфиг битый: {e}")
+    else:
+        console.print(f"  [yellow]\u2717[/yellow] Конфиг не найден: hh-apply init")
+
+    # 5. Auth
+    try:
+        from hh_apply.config import load_config, get_storage_path
+        if config_file.exists():
+            cfg = load_config(str(config_file))
+            sp = get_storage_path(cfg)
+            if sp.exists():
+                console.print(f"  [green]\u2713[/green] Авторизация (storage_state)")
+                ok_count += 1
+            else:
+                console.print("  [yellow]\u2717[/yellow] Не авторизован: hh-apply login")
+        else:
+            console.print("  [dim]-[/dim] Авторизация (нужен конфиг)")
+    except Exception:
+        console.print("  [dim]-[/dim] Авторизация (нужен конфиг)")
+
+    # 6. Database
+    try:
+        from hh_apply.config import load_config, get_db_path
+        if config_file.exists():
+            cfg = load_config(str(config_file))
+            db = get_db_path(cfg)
+            from hh_apply.tracker import Tracker
+            with Tracker(db) as t:
+                total_apps = t.total()
+            console.print(f"  [green]\u2713[/green] База данных ({total_apps} откликов)")
+            ok_count += 1
+        else:
+            console.print("  [dim]-[/dim] База данных (нужен конфиг)")
+    except Exception as e:
+        console.print(f"  [red]\u2717[/red] База данных: {e}")
+
+    console.print(f"\n  [{'green' if ok_count == total else 'yellow'}]{ok_count}/{total} проверок пройдено[/{'green' if ok_count == total else 'yellow'}]\n")
 
 
 if __name__ == "__main__":
