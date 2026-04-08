@@ -33,11 +33,15 @@ class Tracker:
                 ) from e
             raise
 
-        # Проверка целостности
+        # Проверка целостности (только если БД не пустая)
         try:
-            result = self.conn.execute("PRAGMA integrity_check").fetchone()
-            if result and result[0] != "ok":
-                raise sqlite3.DatabaseError(f"DB corrupted: {result[0]}")
+            tables = self.conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+            ).fetchone()
+            if tables and tables[0] > 0:
+                result = self.conn.execute("PRAGMA integrity_check").fetchone()
+                if result and result[0] != "ok":
+                    raise sqlite3.DatabaseError(f"DB corrupted: {result[0]}")
         except sqlite3.DatabaseError:
             self.conn.close()
             backup = Path(db_path).with_suffix(".db.bak")
