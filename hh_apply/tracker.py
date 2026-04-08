@@ -32,6 +32,18 @@ class Tracker:
                     "Закройте его и попробуйте снова."
                 ) from e
             raise
+
+        # Проверка целостности
+        try:
+            result = self.conn.execute("PRAGMA integrity_check").fetchone()
+            if result and result[0] != "ok":
+                raise sqlite3.DatabaseError(f"DB corrupted: {result[0]}")
+        except sqlite3.DatabaseError:
+            self.conn.close()
+            backup = Path(db_path).with_suffix(".db.bak")
+            Path(db_path).rename(backup)
+            self.conn = sqlite3.connect(self.db_path, timeout=10)
+
         self._init_db()
 
     def __enter__(self):
@@ -62,6 +74,14 @@ class Tracker:
         """)
         self.conn.commit()
 
+        # WAL mode для лучшей производительности
+        self.conn.execute("PRAGMA journal_mode=WAL")
+
+        # Индексы
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_skipped_vacancy_id ON skipped_vacancies(vacancy_id)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status)")
+        self.conn.commit()
+
     # === Applications ===
 
     def is_applied(self, vacancy_id: str) -> bool:
@@ -69,6 +89,14 @@ class Tracker:
         row = self.conn.execute(
             f"SELECT 1 FROM applications WHERE vacancy_id = ? AND status IN ({placeholders})",
             (vacancy_id, *SUCCESS_STATUSES),
+        ).fetchone()
+        return row is not None
+
+    def is_skipped(self, vacancy_id: str) -> bool:
+        """Проверяет, была ли вакансия пропущена ранее."""
+        row = self.conn.execute(
+            "SELECT 1 FROM skipped_vacancies WHERE vacancy_id = ?",
+            (vacancy_id,),
         ).fetchone()
         return row is not None
 
