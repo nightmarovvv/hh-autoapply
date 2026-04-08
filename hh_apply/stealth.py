@@ -257,3 +257,12 @@ def human_mouse_move(page, target_x: float, target_y: float) -> None:
     jitter_y = random.uniform(-3, 3)
     page.mouse.move(target_x + jitter_x, target_y + jitter_y, steps=steps)
     page.wait_for_timeout(random.randint(50, 200))
+
+
+def human_wait(page, base_ms: int, variance: float = 0.3) -> None:
+    """Пауза с человеческой вариативностью.
+
+    base_ms=3000, variance=0.3 → wait 2100..3900ms
+    """
+    actual = int(base_ms * random.uniform(1 - variance, 1 + variance))
+    page.wait_for_timeout(actual)
