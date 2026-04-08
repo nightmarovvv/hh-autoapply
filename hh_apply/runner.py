@@ -542,7 +542,12 @@ def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages
     console.print(f"\n[green]Найдено {len(all_vacancies)} вакансий для отклика.[/green]")
     console.print("\n[dim]Это пробный режим — отклики НЕ отправлены.[/dim]")
 
-    # Интерактивный выбор
+    # Интерактивный выбор (только если терминал интерактивный)
+    import sys
+    if not sys.stdin.isatty():
+        console.print("[dim]Запустите [bold]hh-apply run[/bold] чтобы откликнуться на все вакансии.[/dim]")
+        return
+
     proceed = inquirer.confirm(
         message="Откликнуться на выбранные вакансии?",
         default=False,
