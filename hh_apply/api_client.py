@@ -68,12 +68,17 @@ class HHApiClient:
 
     def _save_token(self):
         self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        import os as _os
         data = {
             "access_token": self.access_token,
             "refresh_token": self.refresh_token,
             "access_expires_at": self.access_expires_at,
         }
         self.token_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        try:
+            _os.chmod(str(self.token_path), 0o600)
+        except OSError:
+            pass
 
     @property
     def is_authenticated(self) -> bool:
@@ -156,11 +161,11 @@ class HHApiClient:
             self._last_request_time = time.monotonic()
             logger.debug("API %s %s → %d", method, endpoint, resp.status_code)
 
-        # Авто-рефреш при 403
-        if resp.status_code == 403 and self.is_expired and self.refresh_token:
-            self.do_refresh_token()
-            logger.info("Token refreshed")
+        # Авто-рефреш при 401/403
+        if resp.status_code in (401, 403) and self.refresh_token:
             with self._lock:
+                self.do_refresh_token()
+                logger.info("Token refreshed")
                 resp = self.session.request(
                     method, url,
                     headers=self._headers(),
