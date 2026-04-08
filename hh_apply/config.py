@@ -108,6 +108,10 @@ def _validate_config(config: dict) -> None:
         except (TypeError, ValueError):
             apply_cfg[key] = default
 
+    # delay_min > delay_max → swap
+    if apply_cfg.get("delay_min", 1.5) > apply_cfg.get("delay_max", 4.0):
+        apply_cfg["delay_min"], apply_cfg["delay_max"] = apply_cfg["delay_max"], apply_cfg["delay_min"]
+
     # salary_from — int или None
     search_cfg = config.get("search", {})
     salary = search_cfg.get("salary_from")
@@ -117,12 +121,29 @@ def _validate_config(config: dict) -> None:
         except (TypeError, ValueError):
             search_cfg["salary_from"] = None
 
+    if search_cfg.get("salary_from") is not None and search_cfg["salary_from"] < 0:
+        search_cfg["salary_from"] = 0
+
     # exclude_companies / exclude_keywords — должны быть списками
     filters_cfg = config.get("filters", {})
     for key in ("exclude_companies", "exclude_keywords"):
         val = filters_cfg.get(key, [])
         if not isinstance(val, list):
             filters_cfg[key] = [str(val)] if val else []
+
+    # Проверяем regex-паттерны при загрузке
+    import re
+    for key in ("exclude_pattern", "exclude_company_pattern"):
+        pattern = filters_cfg.get(key, "")
+        if pattern:
+            try:
+                re.compile(pattern)
+            except re.error:
+                import logging
+                logging.getLogger("hh_apply.config").warning(
+                    "Невалидный regex в %s: %s — игнорируется", key, pattern
+                )
+                filters_cfg[key] = ""
 
 
 def render_cover_letter(template: str, vacancy) -> str:
