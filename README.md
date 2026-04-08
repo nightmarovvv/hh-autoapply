@@ -1,3 +1,7 @@
+[![Tests](https://github.com/nightmarovvv/hh-autoapply/actions/workflows/test.yml/badge.svg)](https://github.com/nightmarovvv/hh-autoapply/actions/workflows/test.yml)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+
 # hh-apply
 
 CLI для автоматических откликов на [hh.ru](https://hh.ru). Написан на Python, работает через браузер с антидетектом.
@@ -14,6 +18,23 @@ CLI для автоматических откликов на [hh.ru](https://hh
 - Ведёт базу данных всех откликов с экспортом в CSV/JSON
 - Мониторит ответы рекрутеров (приглашения, отказы, конверсия)
 - Автозапуск по расписанию через crontab
+
+## Как выглядит
+
+<!-- Добавьте скриншоты после первого запуска -->
+<!-- ![init wizard](docs/screenshots/init.png) -->
+<!-- ![live dashboard](docs/screenshots/dashboard.png) -->
+<!-- ![stats](docs/screenshots/stats.png) -->
+
+<details>
+<summary><b>Скриншоты (нажмите чтобы раскрыть)</b></summary>
+
+> Скриншоты будут добавлены после первого запуска. Чтобы добавить свои:
+> 1. Сделайте скриншот терминала
+> 2. Сохраните в `docs/screenshots/`
+> 3. Раскомментируйте строки выше
+
+</details>
 
 ## Установка
 
