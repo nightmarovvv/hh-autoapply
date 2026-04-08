@@ -1186,14 +1186,15 @@ def doctor(config_path):
     except ImportError:
         console.print("  [red]\u2717[/red] Patchright не установлен: pip install patchright")
 
-    # 3. Chromium
+    # 3. Chromium (с таймаутом чтобы не зависнуть)
     chromium_found = False
     try:
-        from patchright.sync_api import sync_playwright
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            browser.close()
-            chromium_found = True
+        import subprocess as _sp
+        result = _sp.run(
+            [sys.executable, "-c", "from patchright.sync_api import sync_playwright; pw=sync_playwright().start(); b=pw.chromium.launch(headless=True); b.close(); pw.stop(); print('ok')"],
+            capture_output=True, text=True, timeout=15,
+        )
+        chromium_found = result.stdout.strip() == "ok"
     except Exception:
         pass
 
