@@ -10,7 +10,11 @@ from pathlib import Path
 from rich.console import Console
 from patchright.sync_api import Page, Playwright
 
-from hh_apply.stealth import apply_stealth, random_viewport, random_user_agent, get_chromium_version
+from hh_apply.stealth import apply_stealth, random_viewport, random_user_agent, get_chromium_version, human_wait
+
+import logging
+
+logger = logging.getLogger("hh_apply.auth")
 
 
 # === Поиск браузеров на компе ===
@@ -153,7 +157,7 @@ def login_native_browser(config: dict, console: Console) -> bool:
             page = context.pages[0] if context.pages else context.new_page()
 
             page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(2000)
+            human_wait(page, 2000)
 
             if check_logged_in(page):
                 context.storage_state(path=str(storage_path))
@@ -163,6 +167,7 @@ def login_native_browser(config: dict, console: Console) -> bool:
                 context.close()
                 return False
     except Exception as e:
+        logger.error("Ошибка при сохранении сессии: %s", e)
         console.print(f"[red]Ошибка при сохранении сессии: {e}[/red]")
         return False
 
@@ -209,8 +214,6 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
     storage_path = get_storage_path(config)
     storage_path.parent.mkdir(parents=True, exist_ok=True)
 
-    os.environ["TZ"] = "Europe/Moscow"
-
     browser = playwright.chromium.launch(**_get_launch_kwargs(config))
 
     viewport = random_viewport()
@@ -223,7 +226,7 @@ def create_context(playwright: Playwright, config: dict) -> tuple:
     ctx_kwargs = dict(
         viewport=viewport,
         locale="ru-RU",
-        timezone_id="Europe/Moscow",
+        timezone_id=config.get("browser", {}).get("timezone", "Europe/Moscow"),
         user_agent=ua,
         device_scale_factor=2,
     )
@@ -260,20 +263,21 @@ def check_logged_in(page: Page) -> bool:
                 return True
 
         return False
-    except Exception:
+    except Exception as e:
+        logger.debug("check_logged_in exception: %s", e)
         return False
 
 
 def login_if_needed(page: Page, config: dict) -> bool:
     """Проверяет авторизацию, при неудаче просит перезапустить login."""
     page.goto("https://hh.ru", wait_until="domcontentloaded", timeout=20000)
-    page.wait_for_timeout(2000)
+    human_wait(page, 2000)
 
     if check_logged_in(page):
         return True
 
     page.goto("https://hh.ru/applicant/resumes", wait_until="domcontentloaded", timeout=20000)
-    page.wait_for_timeout(2000)
+    human_wait(page, 2000)
 
     if "/account/login" not in page.url:
         return True
