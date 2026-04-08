@@ -147,12 +147,13 @@ def login_native_browser(config: dict, console: Console) -> bool:
 
     try:
         with sync_playwright() as pw:
+            timezone = config.get("browser", {}).get("timezone", "Europe/Moscow")
             context = pw.chromium.launch_persistent_context(
                 user_data_dir=profile_dir,
                 headless=True,
                 viewport=random_viewport(),
                 locale="ru-RU",
-                timezone_id="Europe/Moscow",
+                timezone_id=timezone,
             )
             page = context.pages[0] if context.pages else context.new_page()
 
