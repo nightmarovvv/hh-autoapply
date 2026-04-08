@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "hh-apply contributors"},
+    {name = "Alexey Shabunin", email = "nightmarovvv@gmail.com"},
 ]
 keywords = ["hh.ru", "headhunter", "job", "auto-apply", "automation", "cli"]
 classifiers = [
