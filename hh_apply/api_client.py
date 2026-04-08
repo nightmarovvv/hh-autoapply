@@ -16,6 +16,8 @@ from threading import Lock
 from urllib.parse import urlencode, urljoin
 
 import logging
+import warnings
+warnings.filterwarnings("ignore", message=".*urllib3.*OpenSSL.*")
 import requests
 
 logger = logging.getLogger("hh_apply.api")
