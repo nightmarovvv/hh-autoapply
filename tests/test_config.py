@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from hh_apply.config import load_config, render_cover_letter, DEFAULTS
+from hh_apply.config import load_config, render_cover_letter, DEFAULTS, _validate_config
 from hh_apply.search import Vacancy
 
 
@@ -108,3 +108,38 @@ class TestRenderCoverLetter:
     def test_multiple_same_variable(self):
         result = render_cover_letter("{company} и ещё раз {company}", self._vac())
         assert result == "Yandex и ещё раз Yandex"
+
+
+class TestValidateConfig:
+    def test_delay_min_greater_than_max(self):
+        """delay_min > delay_max → swap."""
+        config = {
+            "search": {"query": "test"},
+            "apply": {"delay_min": 5.0, "delay_max": 2.0},
+            "filters": {},
+            "browser": {"data_dir": "~/.hh-apply"},
+        }
+        _validate_config(config)
+        assert config["apply"]["delay_min"] <= config["apply"]["delay_max"]
+
+    def test_negative_salary(self):
+        """Отрицательная зарплата → 0."""
+        config = {
+            "search": {"query": "test", "salary_from": -100},
+            "apply": {},
+            "filters": {},
+            "browser": {"data_dir": "~/.hh-apply"},
+        }
+        _validate_config(config)
+        assert config["search"]["salary_from"] >= 0
+
+    def test_invalid_regex_in_config(self):
+        """Невалидный regex → пустая строка."""
+        config = {
+            "search": {"query": "test"},
+            "apply": {},
+            "filters": {"exclude_pattern": "[invalid"},
+            "browser": {"data_dir": "~/.hh-apply"},
+        }
+        _validate_config(config)
+        assert config["filters"]["exclude_pattern"] == ""

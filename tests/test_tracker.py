@@ -93,6 +93,21 @@ class TestSkipped:
         assert len(tracker.get_skipped()) == 0
 
 
+class TestIsSkipped:
+    def test_is_skipped_true(self, tmp_path):
+        """is_skipped returns True for saved skipped vacancy."""
+        db = tmp_path / "test.db"
+        with Tracker(str(db)) as t:
+            t.save_skipped("123", "Title", "Company", "https://hh.ru/vacancy/123", "test_required")
+            assert t.is_skipped("123") is True
+
+    def test_is_skipped_false(self, tmp_path):
+        """is_skipped returns False for unknown vacancy."""
+        db = tmp_path / "test.db"
+        with Tracker(str(db)) as t:
+            assert t.is_skipped("999") is False
+
+
 class TestExport:
     def test_export_csv(self, tracker, tmp_path):
         tracker.record("1", "Dev1", "Corp1", "sent")
