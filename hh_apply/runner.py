@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import signal
 import sys
 import time
+from pathlib import Path
 
 from rich.console import Console
 from rich.live import Live
@@ -22,10 +24,14 @@ from hh_apply.search import (
     sort_vacancies_fresh_first, count_search_results,
 )
 from hh_apply.apply import apply_to_vacancy, human_delay, _check_captcha, _handle_captcha, _dismiss_popups
+from hh_apply.stealth import human_wait
 from hh_apply.api_apply import check_vacancy_type
 from hh_apply.tracker import Tracker
 from hh_apply.filters import should_skip_vacancy
 from hh_apply.report import SessionReport, print_report, export_report
+from hh_apply.logging_config import setup_logging
+
+logger = logging.getLogger("hh_apply.runner")
 
 
 # Эмодзи для логов
@@ -168,6 +174,9 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
     max_apps = apply_config.get("max_applications", 50)
     delay_min = apply_config.get("delay_min", 1.5)
     delay_max = apply_config.get("delay_max", 4.0)
+
+    setup_logging(Path(config.get("browser", {}).get("data_dir", "~/.hh-apply")).expanduser())
+    logger.info("Сессия: query=%s, limit=%d, dry_run=%s", search_config.get("query", ""), max_apps, dry_run)
     skip_test = filters_config.get("skip_test_vacancies", True)
     skip_foreign = filters_config.get("skip_foreign", False)
 
@@ -206,7 +215,8 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                         console.print("[red]Не авторизован.[/red]")
                         console.print("[dim]Запустите: [bold]hh-apply login[/bold][/dim]")
                         return
-                except Exception:
+                except Exception as e:
+                    logger.error("Ошибка авторизации: %s", e)
                     console.print("[red]Не удалось проверить авторизацию (проблема с сетью).[/red]")
                     console.print("[dim]Проверьте интернет и попробуйте снова.[/dim]")
                     return
@@ -259,7 +269,7 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                         # Приоритизация: свежие вакансии первыми
                         vacancies = sort_vacancies_fresh_first(vacancies)
 
-                        new = [v for v in vacancies if not tracker.is_applied(v.vacancy_id)]
+                        new = [v for v in vacancies if not tracker.is_applied(v.vacancy_id) and not tracker.is_skipped(v.vacancy_id)]
 
                         for vacancy in new:
                             if sent >= max_apps or processed >= max_apps or shutdown or limit_exceeded:
@@ -272,7 +282,8 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                             if (sent + skipped) > 0 and (sent + skipped) % 15 == 0:
                                 try:
                                     logged_in = check_logged_in(page)
-                                except Exception:
+                                except Exception as e:
+                                    logger.warning("Ошибка проверки сессии: %s", e)
                                     logged_in = True  # Лучше продолжить чем остановиться
                                 if not logged_in:
                                     # Retry авторизации
@@ -284,9 +295,9 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                                     # Вернуться на страницу поиска
                                     try:
                                         page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-                                        page.wait_for_timeout(2000)
-                                    except Exception:
-                                        pass
+                                        human_wait(page, 2000)
+                                    except Exception as e:
+                                        logger.warning("Не удалось вернуться на страницу поиска: %s", e)
 
                             # Фильтры
                             skip_reason = should_skip_vacancy(vacancy, filters_config)
@@ -301,7 +312,8 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                             # API-проверка типа
                             try:
                                 info = check_vacancy_type(page, vacancy.vacancy_id)
-                            except Exception:
+                            except Exception as e:
+                                logger.warning("API check_vacancy_type failed для %s: %s", vacancy.vacancy_id, e)
                                 info = {"type": "unknown"}
                             vtype = info.get("type", "unknown")
 
@@ -349,9 +361,9 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                             if "/search/vacancy" not in page.url:
                                 try:
                                     page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-                                    page.wait_for_timeout(2000)
-                                except Exception:
-                                    pass
+                                    human_wait(page, 2000)
+                                except Exception as e:
+                                    logger.warning("Не удалось вернуться на поиск: %s", e)
 
                             if _check_captcha(page):
                                 _handle_captcha(page)
@@ -364,7 +376,8 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
                         try:
                             if not go_next_page(page):
                                 break
-                        except Exception:
+                        except Exception as e:
+                            logger.warning("Ошибка пагинации: %s", e)
                             break
 
                         page_num += 1
@@ -375,8 +388,8 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
             finally:
                 try:
                     context.storage_state(path=str(storage_path))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Не удалось сохранить сессию: %s", e)
                 context.close()
                 browser.close()
 
@@ -397,6 +410,8 @@ def run(config: dict, dry_run: bool = False, report_path: "str | None" = None,
 
     console.print("\n[dim]Совет: hh-apply stats — посмотреть общую статистику[/dim]")
 
+    logger.info("Сессия завершена: sent=%d, total=%d", report.sent_count, report.total)
+
 
 def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages):
     """Dry-run: собирает вакансии и показывает таблицу."""
@@ -404,6 +419,10 @@ def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages
 
     all_vacancies = []
     page_num = 0
+    skipped_applied = 0
+    skipped_filtered = 0
+    skipped_prev = 0
+    filter_reasons = {}
 
     console.print("[bold]Собираю вакансии...[/bold]")
 
@@ -423,9 +442,15 @@ def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages
             if len(all_vacancies) >= max_apps:
                 break
             if tracker.is_applied(v.vacancy_id):
+                skipped_applied += 1
+                continue
+            if tracker.is_skipped(v.vacancy_id):
+                skipped_prev += 1
                 continue
             skip = should_skip_vacancy(v, filters_config)
             if skip:
+                filter_reasons[skip] = filter_reasons.get(skip, 0) + 1
+                skipped_filtered += 1
                 continue
             all_vacancies.append(v)
 
@@ -455,6 +480,20 @@ def _run_dry(page, config, tracker, filters_config, console, max_apps, max_pages
         )
 
     console.print(table)
+
+    # Итоги фильтрации
+    if skipped_applied or skipped_filtered or skipped_prev:
+        console.print()
+        parts = []
+        if skipped_applied:
+            parts.append(f"уже откликались: {skipped_applied}")
+        if skipped_prev:
+            parts.append(f"ранее пропущены: {skipped_prev}")
+        if skipped_filtered:
+            reasons_str = ", ".join(f"{r}: {c}" for r, c in sorted(filter_reasons.items(), key=lambda x: -x[1]))
+            parts.append(f"отфильтровано: {skipped_filtered} ({reasons_str})")
+        console.print(f"[dim]Пропущено: {' | '.join(parts)}[/dim]")
+
     console.print(f"\n[green]Найдено {len(all_vacancies)} вакансий для отклика.[/green]")
     console.print("\n[dim]Это пробный режим — отклики НЕ отправлены.[/dim]")
     console.print("[dim]Запустите [bold]hh-apply run[/bold] чтобы откликнуться на эти вакансии.[/dim]")
