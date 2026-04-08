@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 import time
 
@@ -14,8 +15,10 @@ from patchright.sync_api import Page
 
 from hh_apply.search import Vacancy
 from hh_apply.captcha import solve_captcha_interactive, _check_captcha_present
-from hh_apply.stealth import human_mouse_move
+from hh_apply.stealth import human_mouse_move, human_wait
 from hh_apply.config import render_cover_letter
+
+logger = logging.getLogger("hh_apply.apply")
 
 STATUS_SENT = "sent"
 STATUS_COVER_LETTER = "cover_letter_sent"
@@ -55,7 +58,8 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                 return {{status: 'not_found'}};
             }}
         """)
-        except Exception:
+        except Exception as e:
+            logger.warning("evaluate failed для %s: %s", vacancy.vacancy_id, e)
             return STATUS_ERROR
 
         status = btn_info.get("status", "error")
@@ -66,6 +70,13 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
             return STATUS_ALREADY_APPLIED
         if status == "not_found":
             return STATUS_ERROR
+
+        # Иногда имитируем чтение (10% шанс)
+        if random.random() < 0.10:
+            page.mouse.wheel(0, random.randint(-200, -50))
+            human_wait(page, random.randint(800, 2000))
+            page.mouse.wheel(0, random.randint(50, 200))
+            human_wait(page, random.randint(300, 800))
 
         # Скроллим к карточке
         page.evaluate(f"""
@@ -79,7 +90,7 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                 }}
             }}
         """)
-        page.wait_for_timeout(600)
+        human_wait(page, 600)
 
         # Получаем координаты после скролла
         box = page.evaluate(f"""
@@ -140,7 +151,7 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                 }}
             """)
 
-        page.wait_for_timeout(3000)
+        human_wait(page, 3000)
 
         # Закрываем ВСЕ лишние вкладки (реклама, вакансии, чат)
         _close_extra_tabs(page)
@@ -148,13 +159,18 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
         # Закрываем чат робота-рекрутера и другие попапы
         _dismiss_popups(page)
 
+        # Проверяем rate-limit
+        if _check_rate_limit(page):
+            logger.warning("Rate limit detected для %s", vacancy.vacancy_id)
+            return STATUS_ERROR
+
         # Если нас перекинуло куда-то — разбираемся
         if page.url != original_url:
             result = _handle_redirect(page, vacancy, original_url)
             # КРИТИЧНО: убеждаемся что вернулись на страницу поиска
             if "/search/vacancy" not in page.url:
                 page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
-                page.wait_for_timeout(2000)
+                human_wait(page, 2000)
             return result
 
         # Капча
@@ -208,7 +224,7 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
                     confirm_box["x"] + random.uniform(-5, 5),
                     confirm_box["y"] + random.uniform(-2, 2),
                 )
-                page.wait_for_timeout(3000)
+                human_wait(page, 3000)
 
                 if _check_sent(page):
                     return STATUS_SENT
@@ -246,7 +262,7 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
             return STATUS_EXTRA_STEPS
 
         # Финальная проверка
-        page.wait_for_timeout(2000)
+        human_wait(page, 2000)
         if _check_sent(page):
             return STATUS_SENT
 
@@ -269,6 +285,7 @@ def apply_to_vacancy(page: Page, vacancy: Vacancy,
         return STATUS_ERROR
 
     except Exception as e:
+        logger.error("Ошибка отклика на %s: %s", vacancy.vacancy_id, e, exc_info=True)
         return STATUS_ERROR
 
 
@@ -278,19 +295,19 @@ def _handle_redirect(page: Page, vacancy: Vacancy, original_url: str) -> str:
 
     if any(w in current.lower() for w in test_words):
         page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
-        page.wait_for_timeout(2000)
+        human_wait(page, 2000)
         return STATUS_TEST_REQUIRED
 
     # Чат робота-рекрутера — отклик уже ушёл, просто возвращаемся
     if "/negotiations" in current or "/chat" in current:
         page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
-        page.wait_for_timeout(2000)
+        human_wait(page, 2000)
         return STATUS_SENT
 
     if "vacancy_response" in current:
         if _check_sent(page):
             page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
-            page.wait_for_timeout(2000)
+            human_wait(page, 2000)
             return STATUS_SENT
 
     # Перешли на страницу вакансии — кнопка была ссылкой <a href>
@@ -302,19 +319,35 @@ def _handle_redirect(page: Page, vacancy: Vacancy, original_url: str) -> str:
             vacancy_apply_btn = page.locator('a:has-text("Откликнуться"), button:has-text("Откликнуться")')
         if vacancy_apply_btn.count() > 0:
             vacancy_apply_btn.first.click()
-            page.wait_for_timeout(3000)
+            human_wait(page, 3000)
             if _check_sent(page):
                 page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
-                page.wait_for_timeout(2000)
+                human_wait(page, 2000)
                 return STATUS_SENT
         # Не получилось — возвращаемся
         page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
-        page.wait_for_timeout(2000)
+        human_wait(page, 2000)
         return STATUS_ERROR
 
     page.goto(original_url, wait_until="domcontentloaded", timeout=20000)
-    page.wait_for_timeout(2000)
+    human_wait(page, 2000)
     return STATUS_EXTRA_STEPS
+
+
+def _check_rate_limit(page: Page) -> bool:
+    """Проверяет, не заблокировал ли hh.ru за слишком частые запросы."""
+    try:
+        return page.evaluate("""
+            () => {
+                const text = document.body.innerText.toLowerCase();
+                return text.includes('слишком много запросов') ||
+                       text.includes('доступ временно ограничен') ||
+                       text.includes('too many requests') ||
+                       text.includes('подозрительная активность');
+            }
+        """)
+    except Exception:
+        return False
 
 
 def _check_sent(page: Page) -> bool:
@@ -334,16 +367,16 @@ def _check_sent(page: Page) -> bool:
 def _fill_and_submit(page: Page, vacancy: Vacancy, cover_letter: str, letter_input) -> str:
     rendered = render_cover_letter(cover_letter, vacancy)
     letter_input.click()
-    page.wait_for_timeout(200)
+    human_wait(page, 200)
     letter_input.fill(rendered)
-    page.wait_for_timeout(500)
+    human_wait(page, 500)
 
     submitted = _click_submit(page)
     if not submitted:
         _close_modal(page)
         return STATUS_ERROR
 
-    page.wait_for_timeout(3000)
+    human_wait(page, 3000)
     return STATUS_COVER_LETTER if _check_sent(page) else STATUS_ERROR
 
 
@@ -353,7 +386,7 @@ def _submit_modal(page: Page, vacancy: Vacancy) -> str:
         _close_modal(page)
         return STATUS_ERROR
 
-    page.wait_for_timeout(3000)
+    human_wait(page, 3000)
     return STATUS_SENT if _check_sent(page) else STATUS_ERROR
 
 
@@ -383,7 +416,7 @@ def _handle_captcha(page: Page) -> str:
     """Интерактивное решение капчи: картинка в терминале + ввод."""
     solved = solve_captcha_interactive(page)
     if solved:
-        page.wait_for_timeout(3000)
+        human_wait(page, 3000)
         if _check_sent(page):
             return STATUS_SENT
     return STATUS_CAPTCHA
@@ -396,7 +429,7 @@ def _close_modal(page: Page) -> None:
             if (btn) btn.click();
         }
     """)
-    page.wait_for_timeout(500)
+    human_wait(page, 500)
 
 
 def _is_letter_required(page: Page) -> bool:
