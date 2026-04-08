@@ -12,6 +12,7 @@ import base64
 import os
 import sys
 import tempfile
+import webbrowser
 from pathlib import Path
 
 from patchright.sync_api import Page
@@ -68,7 +69,11 @@ def render_captcha_in_terminal(image_bytes: bytes) -> None:
         # Fallback: сохраняем в файл
         path = render_image_file(image_bytes)
         print(f"\n[Капча сохранена: {path}]")
-        print(f"Откройте файл для просмотра: open {path}")
+        try:
+            webbrowser.open(f"file://{path}")
+        except Exception:
+            pass
+        print(f"Откройте файл для просмотра: {path}")
 
 
 def solve_captcha_interactive(page: Page) -> bool:
